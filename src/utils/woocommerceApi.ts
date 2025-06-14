@@ -338,9 +338,9 @@ class WooCommerceAPI {
 
 // Configuration - Using import.meta.env for Vite instead of process.env
 const wooCommerceConfig: WooCommerceConfig = {
-  baseURL: import.meta.env.VITE_WC_BASE_URL || 'https://your-wordpress-site.com',
-  consumerKey: import.meta.env.VITE_WC_CONSUMER_KEY || 'your_consumer_key',
-  consumerSecret: import.meta.env.VITE_WC_CONSUMER_SECRET || 'your_consumer_secret',
+  baseURL: import.meta.env.VITE_WC_BASE_URL || 'https://localhost/threadx/threadxwp/wp-json/wc/v3',
+  consumerKey: import.meta.env.VITE_WC_CONSUMER_KEY || 'ck_a928b57d9b663d3d5d5c05b38c0a8aeadbe72968',
+  consumerSecret: import.meta.env.VITE_WC_CONSUMER_SECRET || 'cs_38320afaddc7a21545895e47ea2503ac16cc6805',
 };
 
 // Export singleton instance
