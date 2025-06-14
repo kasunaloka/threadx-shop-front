@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
+import axios from 'axios';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
@@ -25,13 +26,70 @@ const ForgotPassword = () => {
     setIsLoading(true);
     
     try {
-      // Simulate API call - in a real app, this would call your password reset endpoint
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Get the base URL for WordPress from environment variables
+      const baseUrl = import.meta.env.VITE_WC_BASE_URL?.replace('/wp-json/wc/v3', '') || 
+                     'https://localhost/threadx/threadxwp';
       
-      setIsSubmitted(true);
-      toast.success('Password reset instructions sent to your email');
-    } catch (error) {
-      toast.error('Failed to send reset email. Please try again.');
+      // WordPress password reset endpoint
+      const resetUrl = `${baseUrl}/wp-json/bdpwr/v1/reset-password`;
+      
+      console.log('Sending password reset request to:', resetUrl);
+      
+      const response = await axios.post(resetUrl, {
+        email: email,
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      });
+
+      console.log('Password reset response:', response.data);
+      
+      if (response.data && (response.data.success || response.data.message)) {
+        setIsSubmitted(true);
+        toast.success('Password reset instructions sent to your email');
+      } else {
+        throw new Error('Unexpected response format');
+      }
+      
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      
+      if (error.response?.data?.message) {
+        toast.error(error.response.data.message);
+      } else if (error.response?.status === 404) {
+        // Try alternative WordPress password reset endpoint
+        try {
+          const altBaseUrl = import.meta.env.VITE_WC_BASE_URL?.replace('/wp-json/wc/v3', '') || 
+                            'https://localhost/threadx/threadxwp';
+          
+          const altResetUrl = `${altBaseUrl}/wp-login.php?action=lostpassword`;
+          
+          // Create a form submission to WordPress native password reset
+          const formData = new FormData();
+          formData.append('user_login', email);
+          formData.append('wp-submit', 'Get New Password');
+          
+          await axios.post(altResetUrl, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+            timeout: 10000,
+          });
+          
+          setIsSubmitted(true);
+          toast.success('Password reset instructions sent to your email');
+          
+        } catch (altError) {
+          console.error('Alternative password reset failed:', altError);
+          toast.error('Failed to send reset email. Please check your email address and try again.');
+        }
+      } else if (error.code === 'ECONNABORTED') {
+        toast.error('Request timed out. Please try again.');
+      } else {
+        toast.error('Failed to send reset email. Please check your email address and try again.');
+      }
     } finally {
       setIsLoading(false);
     }
