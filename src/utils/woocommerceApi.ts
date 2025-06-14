@@ -88,7 +88,7 @@ class WooCommerceAPI {
   constructor(config: WooCommerceConfig) {
     this.config = config;
     this.api = axios.create({
-      baseURL: `${config.baseURL}/wp-json/wc/v3`,
+      baseURL: config.baseURL,
       auth: {
         username: config.consumerKey,
         password: config.consumerSecret,
@@ -135,6 +135,7 @@ class WooCommerceAPI {
       const response: AxiosResponse<WooCommerceProduct[]> = await this.api.get('/products', { params });
       return response.data;
     } catch (error) {
+      console.error('Failed to fetch products:', error);
       throw new Error('Failed to fetch products');
     }
   }
@@ -144,6 +145,7 @@ class WooCommerceAPI {
       const response: AxiosResponse<WooCommerceProduct> = await this.api.get(`/products/${id}`);
       return response.data;
     } catch (error) {
+      console.error('Failed to fetch product:', error);
       throw new Error('Failed to fetch product');
     }
   }
@@ -336,7 +338,7 @@ class WooCommerceAPI {
   }
 }
 
-// Configuration - Using import.meta.env for Vite instead of process.env
+// Configuration - Fixed baseURL to not include /wp-json/wc/v3 twice
 const wooCommerceConfig: WooCommerceConfig = {
   baseURL: import.meta.env.VITE_WC_BASE_URL || 'https://localhost/threadx/threadxwp/wp-json/wc/v3',
   consumerKey: import.meta.env.VITE_WC_CONSUMER_KEY || 'ck_a928b57d9b663d3d5d5c05b38c0a8aeadbe72968',
