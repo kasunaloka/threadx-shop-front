@@ -115,19 +115,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     try {
       logger.log('AuthContext: Starting login process for:', username);
-      
-      // Validate input
-      if (!username.trim() || !password.trim()) {
-        throw new Error('Please enter both username and password.');
-      }
-      
-      const { user, customerId } = await wooCommerceApi.login(username.trim(), password);
+      const { user, customerId } = await wooCommerceApi.login(username, password);
       logger.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
       
       // Ensure we have proper user data
       const userData = {
         id: user.id,
-        email: user.email || username,
+        email: user.email || username, // Fallback to username if email is missing
         username: user.username || username,
         displayName: user.displayName || user.username || username,
         customerId: customerId
@@ -146,20 +140,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       dispatch({ type: 'LOGIN_FAILURE' });
       
       // Show specific error message
-      let errorMessage = 'Login failed. Please check your credentials.';
-      
-      if (error.message) {
-        if (error.message.includes('Invalid username') || error.message.includes('incorrect')) {
-          errorMessage = 'Invalid username or password. Please try again.';
-        } else if (error.message.includes('network') || error.message.includes('timeout')) {
-          errorMessage = 'Network error. Please check your connection and try again.';
-        } else if (error.message.includes('not available')) {
-          errorMessage = 'Login service is temporarily unavailable. Please try again later.';
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
+      const errorMessage = error.message || 'Login failed. Please check your credentials.';
       toast.error(errorMessage);
       return false;
     }
