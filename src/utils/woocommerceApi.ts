@@ -440,28 +440,82 @@ class WooCommerceAPI {
       logger.log('✅ Orders API response status:', response.status);
       logger.log('📦 Orders data received:', response.data?.length || 0, 'orders');
       
-      return response.data || [];
+      let orders = response.data || [];
+      
+      // If no orders found with customer filter, try without customer filter
+      if (orders.length === 0 && finalParams.customer) {
+        logger.log('🔄 No orders found with customer ID, trying general fetch');
+        
+        const fallbackParams = {
+          per_page: 100, // Increased to get more orders
+          orderby: 'date',
+          order: 'desc'
+        };
+        
+        logger.log('🚀 Making fallback API call with params:', fallbackParams);
+        
+        const fallbackResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
+          params: fallbackParams,
+          timeout: 25000
+        });
+        
+        logger.log('✅ Fallback orders API response status:', fallbackResponse.status);
+        logger.log('📦 Fallback orders data received:', fallbackResponse.data?.length || 0, 'orders');
+        
+        const allOrders = fallbackResponse.data || [];
+        
+        // Filter by email and customer ID if we have orders
+        if (allOrders.length > 0 && storedUser) {
+          const userData = JSON.parse(storedUser);
+          logger.log('📧 Filtering orders by user data:', userData);
+          
+          orders = allOrders.filter(order => {
+            const matchesEmail = order.billing?.email === userData.email;
+            const matchesCustomerId = order.customer_id === userData.customerId;
+            
+            logger.log('🔍 Order check:', {
+              orderId: order.id,
+              orderEmail: order.billing?.email,
+              orderCustomerId: order.customer_id,
+              userEmail: userData.email,
+              userCustomerId: userData.customerId,
+              matchesEmail,
+              matchesCustomerId
+            });
+            
+            return matchesEmail || matchesCustomerId;
+          });
+          
+          logger.log('📦 Filtered orders result:', orders.length, 'orders');
+        } else {
+          orders = allOrders;
+        }
+      }
+      
+      logger.log('📦 Final orders result:', orders.length, 'orders');
+      return orders;
     } catch (error: any) {
       logger.error('❌ Orders fetch failed:', error);
       
+      // Try one more time without any filters if we get authentication errors
       if (error.response?.status === 401 || error.response?.status === 403) {
-        logger.log('🔄 Trying without customer filter...');
+        logger.log('🔄 Authentication error, trying basic fetch...');
         try {
-          const fallbackParams = {
-            per_page: 20,
+          const basicParams = {
+            per_page: 50,
             orderby: 'date',
             order: 'desc'
           };
           
-          const fallbackResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
-            params: fallbackParams,
+          const basicResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
+            params: basicParams,
             timeout: 25000
           });
           
-          logger.log('✅ Fallback orders fetch successful:', fallbackResponse.data?.length || 0, 'orders');
-          return fallbackResponse.data || [];
-        } catch (fallbackError) {
-          logger.error('❌ Fallback orders fetch also failed:', fallbackError);
+          logger.log('✅ Basic orders fetch successful:', basicResponse.data?.length || 0, 'orders');
+          return basicResponse.data || [];
+        } catch (basicError) {
+          logger.error('❌ Basic orders fetch also failed:', basicError);
         }
       }
       

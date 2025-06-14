@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -70,39 +69,27 @@ const Orders = () => {
       }
       
       try {
-        // Try with customer ID first if available
-        let fetchedOrders = [];
+        // Start with basic fetch to see if we can get any orders
+        const fetchedOrders = await wooCommerceApi.getOrders({
+          per_page: 50,
+          orderby: 'date',
+          order: 'desc'
+        });
         
-        if (user.customerId) {
-          logger.log('👤 Fetching orders with customer ID:', user.customerId);
-          fetchedOrders = await wooCommerceApi.getOrders({
-            customer: user.customerId,
-            per_page: 20,
-            orderby: 'date',
-            order: 'desc'
+        logger.log('📦 Orders fetched successfully:', fetchedOrders.length);
+        
+        // Log some sample order data for debugging
+        if (fetchedOrders.length > 0) {
+          logger.log('📋 Sample order data:', {
+            firstOrder: {
+              id: fetchedOrders[0].id,
+              customer_id: fetchedOrders[0].customer_id,
+              billing_email: fetchedOrders[0].billing?.email,
+              status: fetchedOrders[0].status
+            }
           });
         }
         
-        // If no orders found with customer ID, try without customer filter
-        if (fetchedOrders.length === 0) {
-          logger.log('🔄 No orders found with customer ID, trying general fetch');
-          fetchedOrders = await wooCommerceApi.getOrders({
-            per_page: 20,
-            orderby: 'date',
-            order: 'desc'
-          });
-          
-          // Filter by email if we have orders
-          if (fetchedOrders.length > 0 && user.email) {
-            logger.log('📧 Filtering orders by email:', user.email);
-            fetchedOrders = fetchedOrders.filter(order => 
-              order.billing?.email === user.email ||
-              order.customer_id === user.customerId
-            );
-          }
-        }
-        
-        logger.log('📦 Final orders result:', fetchedOrders.length, 'orders');
         return fetchedOrders;
       } catch (error) {
         logger.error('❌ Error fetching orders:', error);
@@ -110,9 +97,9 @@ const Orders = () => {
       }
     },
     enabled: isAuthenticated && !!user,
-    retry: 2,
-    retryDelay: 3000,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: 1, // Reduced retry count
+    retryDelay: 2000,
+    staleTime: 2 * 60 * 1000, // Reduced stale time
   });
 
   // Show authentication message if not logged in
@@ -210,11 +197,13 @@ const Orders = () => {
               <Package className="mx-auto h-16 w-16 text-gray-400 mb-4" />
               <h2 className="text-xl font-semibold text-gray-900 mb-2">No Orders Found</h2>
               <p className="text-gray-600 mb-6">
-                {user?.customerId ? 
-                  "No orders found for your account. Start shopping to see your order history here." :
-                  "Unable to find your customer account. Try logging out and back in, or contact support."
-                }
+                No orders were found in the system. This could be because:
               </p>
+              <ul className="text-sm text-gray-500 mb-6 space-y-1">
+                <li>• You haven't placed any orders yet</li>
+                <li>• Orders are associated with a different email address</li>
+                <li>• There might be a connection issue with the store</li>
+              </ul>
               <div className="space-x-4">
                 <Link
                   to="/products"
@@ -222,18 +211,13 @@ const Orders = () => {
                 >
                   Start Shopping
                 </Link>
-                {!user?.customerId && (
-                  <button
-                    onClick={() => {
-                      localStorage.removeItem('wc_user');
-                      localStorage.removeItem('wc_jwt_token');
-                      window.location.href = '/login';
-                    }}
-                    className="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    Re-login
-                  </button>
-                )}
+                <button
+                  onClick={() => refetch()}
+                  className="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Try Again
+                </button>
               </div>
             </CardContent>
           </Card>
