@@ -1,7 +1,7 @@
-
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
+import { logger } from '../utils/logger';
 
 interface User {
   id?: number;
@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const storedUser = localStorage.getItem('wc_user');
           if (storedUser) {
             const userData = JSON.parse(storedUser);
-            console.log('AuthContext: Restored user from storage:', userData);
+            logger.log('AuthContext: Restored user from storage:', userData);
             dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
           } else {
             dispatch({ type: 'LOGIN_FAILURE' });
@@ -102,6 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           dispatch({ type: 'LOGIN_FAILURE' });
         }
       } catch (error) {
+        logger.error('Auth check failed:', error);
         dispatch({ type: 'LOGIN_FAILURE' });
       }
     };
@@ -113,9 +114,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'LOGIN_START' });
     
     try {
-      console.log('AuthContext: Starting login process for:', username);
+      logger.log('AuthContext: Starting login process for:', username);
       const { user, customerId } = await wooCommerceApi.login(username, password);
-      console.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
+      logger.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
       
       // Ensure we have proper user data
       const userData = {
@@ -126,7 +127,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         customerId: customerId
       };
       
-      console.log('AuthContext: Final user data:', userData);
+      logger.log('AuthContext: Final user data:', userData);
       
       // Store user data in localStorage
       localStorage.setItem('wc_user', JSON.stringify(userData));
@@ -135,7 +136,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast.success('Login successful!');
       return true;
     } catch (error: any) {
-      console.error('AuthContext: Login failed:', error);
+      logger.error('AuthContext: Login failed:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
       
       // Show specific error message
@@ -155,7 +156,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
-      console.log('Starting registration process...');
+      logger.log('Starting registration process...');
       
       await wooCommerceApi.register({
         username: userData.username,
@@ -169,7 +170,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast.success('Registration successful! You can now log in.');
       return true;
     } catch (error: any) {
-      console.error('Registration failed:', error);
+      logger.error('Registration failed:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
       
       // Show the specific error message

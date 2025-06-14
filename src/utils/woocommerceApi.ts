@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { logger } from './logger';
 
 // WooCommerce API configuration
 interface WooCommerceConfig {
@@ -104,7 +105,7 @@ class WooCommerceAPI {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 30000, // Increased timeout to 30 seconds
+      timeout: 30000,
     });
 
     // Add request interceptor for JWT token
@@ -113,7 +114,7 @@ class WooCommerceAPI {
         const token = localStorage.getItem('wc_jwt_token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
-          console.log('Added JWT token to request');
+          logger.log('Added JWT token to request');
         }
         return config;
       },
@@ -124,7 +125,7 @@ class WooCommerceAPI {
     this.api.interceptors.response.use(
       (response) => response,
       (error) => {
-        console.error('WooCommerce API Error:', error.response?.data || error.message);
+        logger.error('WooCommerce API Error:', error.response?.data || error.message);
         return Promise.reject(error);
       }
     );
@@ -145,7 +146,7 @@ class WooCommerceAPI {
       const response: AxiosResponse<WooCommerceProduct[]> = await this.api.get('/products', { params });
       return response.data;
     } catch (error) {
-      console.error('Failed to fetch products:', error);
+      logger.error('Failed to fetch products:', error);
       throw new Error('Failed to fetch products');
     }
   }
@@ -155,7 +156,7 @@ class WooCommerceAPI {
       const response: AxiosResponse<WooCommerceProduct> = await this.api.get(`/products/${id}`);
       return response.data;
     } catch (error) {
-      console.error('Failed to fetch product:', error);
+      logger.error('Failed to fetch product:', error);
       throw new Error('Failed to fetch product');
     }
   }
@@ -182,31 +183,8 @@ class WooCommerceAPI {
   // Cart (using WooCommerce Store API with improved error handling)
   async addToCart(productId: number, quantity: number = 1, variation?: Record<string, string>): Promise<any> {
     try {
-      console.log('Adding to cart:', { productId, quantity, variation });
+      logger.log('Adding to cart:', { productId, quantity, variation });
       
-      // First try using the REST API directly (more reliable)
-      const cartItem = {
-        product_id: productId,
-        quantity: quantity,
-        variation_id: 0, // Will be set if variation exists
-        meta_data: []
-      };
-
-      // If variations exist, try to handle them
-      if (variation && Object.keys(variation).length > 0) {
-        // For now, add variation data as meta_data
-        Object.entries(variation).forEach(([key, value]) => {
-          cartItem.meta_data.push({
-            key: key,
-            value: value
-          });
-        });
-      }
-
-      // Try to create an order item directly (fallback approach)
-      console.log('Attempting to add to cart via REST API...');
-      
-      // Since direct cart manipulation might not work, let's simulate local cart
       const cartData = {
         id: productId,
         quantity: quantity,
@@ -214,7 +192,6 @@ class WooCommerceAPI {
         added_at: new Date().toISOString()
       };
 
-      // Store in localStorage as fallback
       const existingCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
       const existingItemIndex = existingCart.findIndex((item: any) => 
         item.id === productId && 
@@ -229,53 +206,22 @@ class WooCommerceAPI {
 
       localStorage.setItem('wc_cart', JSON.stringify(existingCart));
       
-      console.log('Added to local cart successfully');
+      logger.log('Added to local cart successfully');
       return { success: true, cart: existingCart };
       
     } catch (error) {
-      console.error('Add to cart error:', error);
-      
-      // Final fallback: just store locally
-      try {
-        const cartData = {
-          id: productId,
-          quantity: quantity,
-          variation: variation || {},
-          added_at: new Date().toISOString()
-        };
-
-        const existingCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
-        const existingItemIndex = existingCart.findIndex((item: any) => 
-          item.id === productId && 
-          JSON.stringify(item.variation) === JSON.stringify(variation || {})
-        );
-
-        if (existingItemIndex >= 0) {
-          existingCart[existingItemIndex].quantity += quantity;
-        } else {
-          existingCart.push(cartData);
-        }
-
-        localStorage.setItem('wc_cart', JSON.stringify(existingCart));
-        
-        console.log('Fallback: Added to local cart');
-        return { success: true, cart: existingCart };
-      } catch (fallbackError) {
-        console.error('All cart methods failed:', fallbackError);
-        throw new Error('Unable to add item to cart. Please try again.');
-      }
+      logger.error('Add to cart error:', error);
+      throw new Error('Unable to add item to cart. Please try again.');
     }
   }
 
   async getCart(): Promise<any> {
     try {
-      console.log('Fetching cart...');
+      logger.log('Fetching cart...');
       
-      // First try to get from localStorage
       const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
       
       if (localCart.length > 0) {
-        // Convert local cart to WooCommerce format
         const cartItems = localCart.map((item: any, index: number) => ({
           key: `local_${item.id}_${index}`,
           id: item.id,
@@ -325,7 +271,6 @@ class WooCommerceAPI {
         };
       }
 
-      // Return empty cart if no local cart
       return {
         items: [],
         items_count: 0,
@@ -362,9 +307,8 @@ class WooCommerceAPI {
         extensions: {}
       };
     } catch (error) {
-      console.error('Get cart error:', error);
+      logger.error('Get cart error:', error);
       
-      // Return empty cart structure if cart fetch fails
       return {
         items: [],
         items_count: 0,
@@ -405,9 +349,8 @@ class WooCommerceAPI {
 
   async updateCartItem(key: string, quantity: number): Promise<any> {
     try {
-      console.log('Updating cart item:', { key, quantity });
+      logger.log('Updating cart item:', { key, quantity });
       
-      // Handle local cart updates
       if (key.startsWith('local_')) {
         const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
         const itemIndex = parseInt(key.split('_')[2]);
@@ -421,16 +364,15 @@ class WooCommerceAPI {
       
       return { success: true };
     } catch (error) {
-      console.error('Update cart item error:', error);
+      logger.error('Update cart item error:', error);
       throw new Error('Failed to update cart item');
     }
   }
 
   async removeCartItem(key: string): Promise<any> {
     try {
-      console.log('Removing cart item:', { key });
+      logger.log('Removing cart item:', { key });
       
-      // Handle local cart removal
       if (key.startsWith('local_')) {
         const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
         const itemIndex = parseInt(key.split('_')[2]);
@@ -444,7 +386,7 @@ class WooCommerceAPI {
       
       return { success: true };
     } catch (error) {
-      console.error('Remove cart item error:', error);
+      logger.error('Remove cart item error:', error);
       throw new Error('Failed to remove cart item');
     }
   }
@@ -459,23 +401,21 @@ class WooCommerceAPI {
     order?: string;
   }): Promise<WooCommerceOrder[]> {
     try {
-      console.log('🔍 Starting order fetch with params:', params);
+      logger.log('🔍 Starting order fetch with params:', params);
       
-      // Get user data from localStorage
       const storedUser = localStorage.getItem('wc_user');
       let finalParams = { ...params };
       
       if (storedUser) {
         const userData = JSON.parse(storedUser);
-        console.log('📱 User data from storage:', userData);
+        logger.log('📱 User data from storage:', userData);
         
         if (userData.customerId && !finalParams.customer) {
           finalParams.customer = userData.customerId;
-          console.log('👤 Using customer ID:', userData.customerId);
+          logger.log('👤 Using customer ID:', userData.customerId);
         }
       }
       
-      // Set default parameters
       const queryParams = {
         per_page: 20,
         orderby: 'date',
@@ -483,32 +423,22 @@ class WooCommerceAPI {
         ...finalParams
       };
       
-      console.log('🚀 Making API call with params:', queryParams);
-      console.log('🔗 API URL:', `${this.config.baseURL}/orders`);
-      console.log('🔑 Auth headers:', this.api.defaults.auth);
+      logger.log('🚀 Making API call with params:', queryParams);
       
       const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
         params: queryParams,
         timeout: 25000
       });
       
-      console.log('✅ Orders API response status:', response.status);
-      console.log('📦 Orders data received:', response.data?.length || 0, 'orders');
-      console.log('🔍 First order sample:', response.data?.[0]);
+      logger.log('✅ Orders API response status:', response.status);
+      logger.log('📦 Orders data received:', response.data?.length || 0, 'orders');
       
       return response.data || [];
     } catch (error: any) {
-      console.error('❌ Orders fetch failed:', error);
-      console.error('📊 Error details:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message,
-        code: error.code
-      });
+      logger.error('❌ Orders fetch failed:', error);
       
-      // Try alternative approach if customer-specific query fails
       if (error.response?.status === 401 || error.response?.status === 403) {
-        console.log('🔄 Trying without customer filter...');
+        logger.log('🔄 Trying without customer filter...');
         try {
           const fallbackParams = {
             per_page: 20,
@@ -521,14 +451,13 @@ class WooCommerceAPI {
             timeout: 25000
           });
           
-          console.log('✅ Fallback orders fetch successful:', fallbackResponse.data?.length || 0, 'orders');
+          logger.log('✅ Fallback orders fetch successful:', fallbackResponse.data?.length || 0, 'orders');
           return fallbackResponse.data || [];
         } catch (fallbackError) {
-          console.error('❌ Fallback orders fetch also failed:', fallbackError);
+          logger.error('❌ Fallback orders fetch also failed:', fallbackError);
         }
       }
       
-      // Return empty array to prevent UI breaking
       return [];
     }
   }
@@ -554,54 +483,38 @@ class WooCommerceAPI {
   // Authentication
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
-      console.log('🔐 Attempting login with username:', username);
+      logger.log('🔐 Attempting login with username:', username);
       
-      // Try the JWT auth endpoint first
       const jwtUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`;
-      console.log('🌐 JWT URL:', jwtUrl);
+      logger.log('🌐 JWT URL:', jwtUrl);
       
       const response = await axios.post(jwtUrl, {
         username,
         password,
       });
       
-      console.log('✅ JWT Login response:', response.data);
+      logger.log('✅ JWT Login response:', response.data);
       
       const { token, user_email, user_nicename, user_display_name } = response.data;
       localStorage.setItem('wc_jwt_token', token);
       
-      // Try to get customer ID
       let customerId;
       try {
-        console.log('🔍 Looking for customer with email:', user_email);
+        logger.log('🔍 Looking for customer with email:', user_email);
         const customerResponse = await this.api.get('/customers', {
           params: {
             email: user_email,
           }
         });
         
-        console.log('👥 Customer search response:', customerResponse.data);
+        logger.log('👥 Customer search response:', customerResponse.data);
         
         if (customerResponse.data && customerResponse.data.length > 0) {
           customerId = customerResponse.data[0].id;
-          console.log('✅ Found customer ID:', customerId);
-        } else {
-          console.log('⚠️ No customer found with email, trying username...');
-          
-          // Try searching by username
-          const usernameResponse = await this.api.get('/customers', {
-            params: {
-              search: user_nicename,
-            }
-          });
-          
-          if (usernameResponse.data && usernameResponse.data.length > 0) {
-            customerId = usernameResponse.data[0].id;
-            console.log('✅ Found customer ID by username:', customerId);
-          }
+          logger.log('✅ Found customer ID:', customerId);
         }
       } catch (customerError) {
-        console.log('⚠️ Could not fetch customer ID:', customerError);
+        logger.log('⚠️ Could not fetch customer ID:', customerError);
       }
       
       const userData = {
@@ -610,7 +523,7 @@ class WooCommerceAPI {
         displayName: user_display_name,
       };
       
-      console.log('✅ Final login data:', { userData, customerId });
+      logger.log('✅ Final login data:', { userData, customerId });
       
       return {
         token,
@@ -618,9 +531,8 @@ class WooCommerceAPI {
         customerId
       };
     } catch (error: any) {
-      console.error('❌ Login error:', error.response?.data || error.message);
+      logger.error('❌ Login error:', error.response?.data || error.message);
       
-      // Check for specific error messages
       if (error.response?.data?.message) {
         throw new Error(error.response.data.message);
       } else if (error.response?.status === 403) {
@@ -641,9 +553,8 @@ class WooCommerceAPI {
     last_name?: string;
   }): Promise<any> {
     try {
-      console.log('Attempting registration with data:', userData);
+      logger.log('Attempting registration with data:', userData);
       
-      // Use the WooCommerce REST API customers endpoint
       const response = await this.api.post('/customers', {
         username: userData.username,
         email: userData.email,
@@ -661,12 +572,11 @@ class WooCommerceAPI {
         }
       });
       
-      console.log('Registration successful:', response.data);
+      logger.log('Registration successful:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('Registration error details:', error.response?.data || error.message);
+      logger.error('Registration error details:', error.response?.data || error.message);
       
-      // Check for specific error messages
       if (error.response?.data?.message) {
         throw new Error(error.response.data.message);
       } else if (error.response?.data?.code === 'registration-error-email-exists') {
@@ -684,9 +594,7 @@ class WooCommerceAPI {
       const token = localStorage.getItem('wc_jwt_token');
       if (!token) return false;
 
-      // Check if it's a JWT token or our simple token
       if (token.includes('.')) {
-        // JWT token - validate with WordPress
         await axios.post(
           `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token/validate`,
           {},
@@ -697,7 +605,6 @@ class WooCommerceAPI {
           }
         );
       } else {
-        // Simple token - check if it's not expired (24 hours)
         const tokenData = atob(token);
         const [, timestamp] = tokenData.split(':');
         const tokenAge = Date.now() - parseInt(timestamp);
@@ -711,7 +618,7 @@ class WooCommerceAPI {
       
       return true;
     } catch (error) {
-      console.error('Token validation error:', error);
+      logger.error('Token validation error:', error);
       localStorage.removeItem('wc_jwt_token');
       return false;
     }
@@ -730,9 +637,9 @@ class WooCommerceAPI {
       });
       
       this.storeApiNonce = response.headers['x-wc-store-api-nonce'] || null;
-      console.log('Store API nonce refreshed:', this.storeApiNonce ? 'success' : 'not found');
+      logger.log('Store API nonce refreshed:', this.storeApiNonce ? 'success' : 'not found');
     } catch (error) {
-      console.log('Could not refresh store API nonce, using local cart fallback');
+      logger.log('Could not refresh store API nonce, using local cart fallback');
       this.storeApiNonce = null;
     }
   }
@@ -745,13 +652,20 @@ class WooCommerceAPI {
   }
 }
 
-// Configuration - Fixed baseURL to not include /wp-json/wc/v3 twice
-const wooCommerceConfig: WooCommerceConfig = {
-  baseURL: import.meta.env.VITE_WC_BASE_URL || 'https://localhost/threadx/threadxwp/wp-json/wc/v3',
-  consumerKey: import.meta.env.VITE_WC_CONSUMER_KEY || 'ck_a928b57d9b663d3d5d5c05b38c0a8aeadbe72968',
-  consumerSecret: import.meta.env.VITE_WC_CONSUMER_SECRET || 'cs_38320afaddc7a21545895e47ea2503ac16cc6805',
+// Configuration with better environment variable handling
+const getEnvVar = (key: string, fallback: string): string => {
+  const value = import.meta.env[key];
+  if (!value && import.meta.env.PROD) {
+    logger.warn(`Missing environment variable: ${key}, using fallback`);
+  }
+  return value || fallback;
 };
 
-// Export singleton instance
+const wooCommerceConfig: WooCommerceConfig = {
+  baseURL: getEnvVar('VITE_WC_BASE_URL', 'https://localhost/threadx/threadxwp/wp-json/wc/v3'),
+  consumerKey: getEnvVar('VITE_WC_CONSUMER_KEY', 'ck_a928b57d9b663d3d5d5c05b38c0a8aeadbe72968'),
+  consumerSecret: getEnvVar('VITE_WC_CONSUMER_SECRET', 'cs_38320afaddc7a21545895e47ea2503ac16cc6805'),
+};
+
 export const wooCommerceApi = new WooCommerceAPI(wooCommerceConfig);
 export default wooCommerceApi;
