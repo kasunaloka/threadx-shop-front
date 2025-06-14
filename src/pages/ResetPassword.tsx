@@ -4,12 +4,13 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useToast } from '../hooks/use-toast';
+import { useSupabaseAuthContext } from '../context/SupabaseAuthContext';
+import { toast } from 'sonner';
 
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { toast } = useToast();
+  const { updatePassword } = useSupabaseAuthContext();
   
   const [formData, setFormData] = useState({
     password: '',
@@ -18,43 +19,17 @@ const ResetPassword = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isValidToken, setIsValidToken] = useState<boolean | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   
-  const token = searchParams.get('token');
+  const accessToken = searchParams.get('access_token');
+  const refreshToken = searchParams.get('refresh_token');
 
   useEffect(() => {
-    if (!token) {
-      setIsValidToken(false);
+    if (!accessToken || !refreshToken) {
+      toast.error('Invalid reset link. Please request a new password reset.');
       return;
     }
-
-    // Verify token validity
-    const verifyToken = async () => {
-      try {
-        // Simulate token verification - replace with actual API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Here you would make the actual API call to verify the token
-        // const response = await fetch('/api/verify-reset-token', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ token })
-        // });
-        
-        setIsValidToken(true);
-      } catch (error) {
-        setIsValidToken(false);
-        toast({
-          title: "Invalid Reset Link",
-          description: "This password reset link is invalid or has expired.",
-          variant: "destructive"
-        });
-      }
-    };
-
-    verifyToken();
-  }, [token, toast]);
+  }, [accessToken, refreshToken]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -82,57 +57,34 @@ const ResetPassword = () => {
     e.preventDefault();
     
     if (!formData.password || !formData.confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Please fill in all fields.",
-        variant: "destructive"
-      });
+      toast.error('Please fill in all fields.');
       return;
     }
 
     const passwordValidation = validatePassword(formData.password);
     if (!passwordValidation.isValid) {
-      toast({
-        title: "Invalid Password",
-        description: "Password must meet all requirements.",
-        variant: "destructive"
-      });
+      toast.error('Password must meet all requirements.');
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
-      toast({
-        title: "Passwords Don't Match",
-        description: "Please make sure both passwords are the same.",
-        variant: "destructive"
-      });
+      toast.error('Passwords don\'t match.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      // Simulate API call - replace with actual API endpoint
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const { error } = await updatePassword(formData.password);
       
-      // Here you would make the actual API call to reset the password
-      // const response = await fetch('/api/reset-password', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ token, password: formData.password })
-      // });
+      if (error) {
+        throw error;
+      }
 
       setIsSuccess(true);
-      toast({
-        title: "Password Reset Successful",
-        description: "Your password has been updated successfully.",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to reset password. Please try again.",
-        variant: "destructive"
-      });
+      toast.success('Password reset successful!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reset password. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -140,24 +92,8 @@ const ResetPassword = () => {
 
   const passwordValidation = validatePassword(formData.password);
 
-  // Loading state while verifying token
-  if (isValidToken === null) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navbar />
-        <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <div className="bg-white rounded-lg shadow-sm p-8 border border-gray-100 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mx-auto mb-4"></div>
-            <p className="text-gray-600">Verifying reset link...</p>
-          </div>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
-
   // Invalid token state
-  if (isValidToken === false) {
+  if (!accessToken || !refreshToken) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navbar />
