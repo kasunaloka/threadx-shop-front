@@ -9,57 +9,6 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      products: {
-        Row: {
-          category: string | null
-          colors: Json | null
-          created_at: string | null
-          description: string | null
-          id: number
-          image: string | null
-          instock: boolean | null
-          isnew: boolean | null
-          name: string
-          originalprice: number | null
-          price: number
-          rating: number | null
-          reviews: number | null
-          updated_at: string | null
-        }
-        Insert: {
-          category?: string | null
-          colors?: Json | null
-          created_at?: string | null
-          description?: string | null
-          id?: number
-          image?: string | null
-          instock?: boolean | null
-          isnew?: boolean | null
-          name: string
-          originalprice?: number | null
-          price: number
-          rating?: number | null
-          reviews?: number | null
-          updated_at?: string | null
-        }
-        Update: {
-          category?: string | null
-          colors?: Json | null
-          created_at?: string | null
-          description?: string | null
-          id?: number
-          image?: string | null
-          instock?: boolean | null
-          isnew?: boolean | null
-          name?: string
-          originalprice?: number | null
-          price?: number
-          rating?: number | null
-          reviews?: number | null
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
       profiles: {
         Row: {
           created_at: string | null
