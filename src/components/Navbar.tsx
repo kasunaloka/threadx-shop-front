@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, LogOut } from 'lucide-react';
+import { ShoppingCart, User, LogOut, Menu, X } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,11 +21,11 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="bg-white shadow-sm border-b sticky top-0 z-50">
+    <nav className="bg-white shadow-lg border-b border-gray-100 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link to="/" className="text-2xl font-bold text-black">
+          <Link to="/" className="text-2xl font-bold text-gray-900 hover:text-blue-600 transition-colors">
             Threadx
           </Link>
 
@@ -33,16 +33,20 @@ const Navbar = () => {
           <div className="hidden md:flex items-center space-x-8">
             <Link 
               to="/" 
-              className={`font-medium transition-colors ${
-                isActive('/') ? 'text-blue-600' : 'text-gray-700 hover:text-blue-600'
+              className={`font-medium transition-colors px-3 py-2 rounded-md ${
+                isActive('/') 
+                  ? 'text-blue-600 bg-blue-50' 
+                  : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
               }`}
             >
               Home
             </Link>
             <Link 
               to="/products" 
-              className={`font-medium transition-colors ${
-                isActive('/products') ? 'text-blue-600' : 'text-gray-700 hover:text-blue-600'
+              className={`font-medium transition-colors px-3 py-2 rounded-md ${
+                isActive('/products') 
+                  ? 'text-blue-600 bg-blue-50' 
+                  : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
               }`}
             >
               Products
@@ -51,25 +55,37 @@ const Navbar = () => {
             {/* Authentication Section */}
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
+                <Link 
+                  to="/orders" 
+                  className={`font-medium transition-colors px-3 py-2 rounded-md ${
+                    isActive('/orders') 
+                      ? 'text-blue-600 bg-blue-50' 
+                      : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Orders
+                </Link>
+                <div className="flex items-center space-x-2 px-3 py-2 bg-gray-50 rounded-md">
                   <User size={16} className="text-gray-600" />
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-700 font-medium">
                     {user?.displayName || user?.username || 'User'}
                   </span>
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors"
+                  className="flex items-center space-x-1 text-gray-700 hover:text-red-600 transition-colors px-3 py-2 rounded-md hover:bg-red-50"
                 >
                   <LogOut size={16} />
-                  <span className="text-sm">Logout</span>
+                  <span className="text-sm font-medium">Logout</span>
                 </button>
               </div>
             ) : (
               <Link 
                 to="/login" 
-                className={`font-medium transition-colors ${
-                  isActive('/login') ? 'text-blue-600' : 'text-gray-700 hover:text-blue-600'
+                className={`font-medium transition-colors px-4 py-2 rounded-md border ${
+                  isActive('/login') 
+                    ? 'text-blue-600 border-blue-600 bg-blue-50' 
+                    : 'text-gray-700 border-gray-300 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50'
                 }`}
               >
                 Login
@@ -78,11 +94,11 @@ const Navbar = () => {
             
             <Link 
               to="/cart" 
-              className="relative p-2 text-gray-700 hover:text-blue-600 transition-colors"
+              className="relative p-3 text-gray-700 hover:text-blue-600 transition-colors hover:bg-gray-50 rounded-md"
             >
               <ShoppingCart size={24} />
               {cartItemsCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center font-medium shadow-md">
                   {cartItemsCount}
                 </span>
               )}
@@ -92,42 +108,85 @@ const Navbar = () => {
           {/* Mobile menu button */}
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="md:hidden p-2 text-gray-700"
+            className="md:hidden p-2 text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md transition-colors"
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
 
         {/* Mobile Navigation */}
         {isMenuOpen && (
-          <div className="md:hidden py-4 border-t">
-            <div className="flex flex-col space-y-4">
-              <Link to="/" className="text-gray-700 hover:text-blue-600 font-medium">Home</Link>
-              <Link to="/products" className="text-gray-700 hover:text-blue-600 font-medium">Products</Link>
+          <div className="md:hidden py-4 border-t border-gray-100 bg-white">
+            <div className="flex flex-col space-y-2">
+              <Link 
+                to="/" 
+                className={`font-medium px-3 py-2 rounded-md transition-colors ${
+                  isActive('/') 
+                    ? 'text-blue-600 bg-blue-50' 
+                    : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                }`}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Home
+              </Link>
+              <Link 
+                to="/products" 
+                className={`font-medium px-3 py-2 rounded-md transition-colors ${
+                  isActive('/products') 
+                    ? 'text-blue-600 bg-blue-50' 
+                    : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                }`}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Products
+              </Link>
               
               {isAuthenticated ? (
                 <>
-                  <div className="flex items-center space-x-2 text-gray-700">
+                  <Link 
+                    to="/orders" 
+                    className={`font-medium px-3 py-2 rounded-md transition-colors ${
+                      isActive('/orders') 
+                        ? 'text-blue-600 bg-blue-50' 
+                        : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Orders
+                  </Link>
+                  <div className="flex items-center space-x-2 text-gray-700 px-3 py-2 bg-gray-50 rounded-md mx-0">
                     <User size={16} />
-                    <span className="text-sm">
+                    <span className="text-sm font-medium">
                       {user?.displayName || user?.username || 'User'}
                     </span>
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 font-medium"
+                    className="flex items-center space-x-2 text-gray-700 hover:text-red-600 font-medium px-3 py-2 rounded-md hover:bg-red-50 transition-colors text-left"
                   >
                     <LogOut size={16} />
                     <span>Logout</span>
                   </button>
                 </>
               ) : (
-                <Link to="/login" className="text-gray-700 hover:text-blue-600 font-medium">Login</Link>
+                <Link 
+                  to="/login" 
+                  className={`font-medium px-3 py-2 rounded-md border transition-colors ${
+                    isActive('/login') 
+                      ? 'text-blue-600 border-blue-600 bg-blue-50' 
+                      : 'text-gray-700 border-gray-300 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50'
+                  }`}
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Login
+                </Link>
               )}
               
-              <Link to="/cart" className="flex items-center text-gray-700 hover:text-blue-600 font-medium">
+              <Link 
+                to="/cart" 
+                className="flex items-center text-gray-700 hover:text-blue-600 font-medium px-3 py-2 rounded-md hover:bg-gray-50 transition-colors"
+                onClick={() => setIsMenuOpen(false)}
+              >
                 <ShoppingCart size={20} className="mr-2" />
                 Cart ({cartItemsCount})
               </Link>
