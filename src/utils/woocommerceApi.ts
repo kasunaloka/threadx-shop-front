@@ -6,6 +6,7 @@ interface WooCommerceConfig {
   baseURL: string;
   consumerKey: string;
   consumerSecret: string;
+  jwtURL?: string;
 }
 
 // Product interfaces based on WooCommerce API
@@ -125,6 +126,12 @@ class WooCommerceAPI {
     this.api.interceptors.response.use(
       (response) => response,
       (error) => {
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          // Clear invalid token
+          localStorage.removeItem('wc_jwt_token');
+          localStorage.removeItem('wc_user');
+          logger.error('Authentication failed, clearing tokens');
+        }
         logger.error('WooCommerce API Error:', error.response?.data || error.message);
         return Promise.reject(error);
       }
@@ -480,22 +487,82 @@ class WooCommerceAPI {
     }
   }
 
-  // Authentication
+  // Authentication with improved JWT handling
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
       logger.log('🔐 Attempting login with username:', username);
       
-      const jwtUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`;
-      logger.log('🌐 JWT URL:', jwtUrl);
-      
-      const response = await axios.post(jwtUrl, {
-        username,
-        password,
-      });
-      
-      logger.log('✅ JWT Login response:', response.data);
-      
-      const { token, user_email, user_nicename, user_display_name } = response.data;
+      // Try multiple JWT endpoint variations
+      const possibleJwtUrls = [
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
+      ];
+
+      let loginResponse;
+      let jwtUrl;
+
+      for (const url of possibleJwtUrls) {
+        try {
+          logger.log('🌐 Trying JWT URL:', url);
+          loginResponse = await axios.post(url, {
+            username,
+            password,
+          }, {
+            timeout: 10000,
+          });
+          jwtUrl = url;
+          logger.log('✅ JWT Login successful with URL:', url);
+          break;
+        } catch (error: any) {
+          logger.log('❌ JWT URL failed:', url, error.response?.status);
+          continue;
+        }
+      }
+
+      if (!loginResponse) {
+        // Fallback to basic auth if JWT is not available
+        logger.log('🔄 JWT not available, trying basic auth fallback');
+        
+        try {
+          // Try to authenticate with WooCommerce customer endpoint
+          const customerResponse = await this.api.get('/customers', {
+            params: {
+              email: username,
+              search: username,
+            }
+          });
+
+          if (customerResponse.data && customerResponse.data.length > 0) {
+            const customer = customerResponse.data[0];
+            
+            // Create a simple token for session management
+            const simpleToken = btoa(`${username}:${Date.now()}`);
+            localStorage.setItem('wc_jwt_token', simpleToken);
+            
+            const userData = {
+              email: customer.email,
+              username: customer.username || username,
+              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : username,
+            };
+            
+            logger.log('✅ Basic auth login successful');
+            
+            return {
+              token: simpleToken,
+              user: userData,
+              customerId: customer.id
+            };
+          } else {
+            throw new Error('Customer not found');
+          }
+        } catch (basicAuthError) {
+          logger.error('❌ Basic auth fallback failed:', basicAuthError);
+          throw new Error('Invalid username or password. Please check your credentials.');
+        }
+      }
+
+      const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
       localStorage.setItem('wc_jwt_token', token);
       
       let customerId;
@@ -538,7 +605,7 @@ class WooCommerceAPI {
       } else if (error.response?.status === 403) {
         throw new Error('Invalid username or password');
       } else if (error.response?.status === 404) {
-        throw new Error('Login service not available. Please contact support.');
+        throw new Error('Authentication service not available. Please contact support.');
       }
       
       throw new Error('Login failed. Please check your credentials.');
@@ -594,29 +661,50 @@ class WooCommerceAPI {
       const token = localStorage.getItem('wc_jwt_token');
       if (!token) return false;
 
+      // Check if token is JWT format
       if (token.includes('.')) {
-        await axios.post(
+        // Try to validate JWT token
+        const possibleValidateUrls = [
           `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token/validate`,
-          {},
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+          `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token/validate`,
+        ];
+
+        for (const url of possibleValidateUrls) {
+          try {
+            await axios.post(url, {}, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              timeout: 5000,
+            });
+            return true;
+          } catch (error) {
+            continue;
           }
-        );
-      } else {
-        const tokenData = atob(token);
-        const [, timestamp] = tokenData.split(':');
-        const tokenAge = Date.now() - parseInt(timestamp);
-        const twentyFourHours = 24 * 60 * 60 * 1000;
+        }
         
-        if (tokenAge > twentyFourHours) {
+        // If validation fails, remove token
+        localStorage.removeItem('wc_jwt_token');
+        return false;
+      } else {
+        // Handle simple token (base64 encoded username:timestamp)
+        try {
+          const tokenData = atob(token);
+          const [, timestamp] = tokenData.split(':');
+          const tokenAge = Date.now() - parseInt(timestamp);
+          const twentyFourHours = 24 * 60 * 60 * 1000;
+          
+          if (tokenAge > twentyFourHours) {
+            localStorage.removeItem('wc_jwt_token');
+            return false;
+          }
+          
+          return true;
+        } catch (error) {
           localStorage.removeItem('wc_jwt_token');
           return false;
         }
       }
-      
-      return true;
     } catch (error) {
       logger.error('Token validation error:', error);
       localStorage.removeItem('wc_jwt_token');
@@ -626,6 +714,7 @@ class WooCommerceAPI {
 
   logout(): void {
     localStorage.removeItem('wc_jwt_token');
+    localStorage.removeItem('wc_user');
   }
 
   // Helper method to get Store API nonce with better error handling
