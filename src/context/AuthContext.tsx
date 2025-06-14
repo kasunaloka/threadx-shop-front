@@ -156,12 +156,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const { user, customerId } = await wooCommerceApi.login(username, password);
         logger.log('AuthContext: WordPress login successful');
         
-        const userData = {
+        const userData: User = {
           id: user.id,
           email: user.email || username,
           username: user.username || username,
           displayName: user.displayName || user.username || username,
-          customerId: customerId
+          customerId: customerId,
+          supabaseId: undefined
         };
         
         // If we have a Supabase user, sync the WordPress data
@@ -197,7 +198,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (data.user) {
-          const userData = {
+          const userData: User = {
             id: undefined,
             email: data.user.email || username,
             username: data.user.user_metadata?.username || username,
