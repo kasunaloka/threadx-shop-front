@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingCart, User, LogOut, Menu, X, ChevronDown } from 'lucide-react';
@@ -87,11 +88,9 @@ const Navbar = () => {
                       My Account
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <Link to="/profile">
-                        <User className="mr-2 h-4 w-4" />
-                        Profile
-                      </Link>
+                    <DropdownMenuItem className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+                      <User className="mr-2 h-4 w-4" />
+                      Profile
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       onClick={handleLogout}
@@ -177,17 +176,6 @@ const Navbar = () => {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     Orders
-                  </Link>
-                  <Link 
-                    to="/profile" 
-                    className={`font-medium px-3 py-2 rounded-md transition-colors ${
-                      isActive('/profile') 
-                        ? 'text-blue-600 bg-blue-50' 
-                        : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
-                    }`}
-                    onClick={() => setIsMenuOpen(false)}
-                  >
-                    Profile
                   </Link>
                   <div className="flex items-center space-x-2 text-gray-700 px-3 py-2 bg-gray-50 rounded-md mx-0">
                     <User size={16} />
