@@ -93,6 +93,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const storedUser = localStorage.getItem('wc_user');
           if (storedUser) {
             const userData = JSON.parse(storedUser);
+            console.log('AuthContext: Restored user from storage:', userData);
             dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
           } else {
             dispatch({ type: 'LOGIN_FAILURE' });
@@ -112,14 +113,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'LOGIN_START' });
     
     try {
-      console.log('AuthContext: Starting login process...');
+      console.log('AuthContext: Starting login process for:', username);
       const { user, customerId } = await wooCommerceApi.login(username, password);
       console.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
       
+      // Ensure we have proper user data
       const userData = {
-        ...user,
-        customerId: customerId || undefined
+        id: user.id,
+        email: user.email || username, // Fallback to username if email is missing
+        username: user.username || username,
+        displayName: user.displayName || user.username || username,
+        customerId: customerId
       };
+      
+      console.log('AuthContext: Final user data:', userData);
       
       // Store user data in localStorage
       localStorage.setItem('wc_user', JSON.stringify(userData));

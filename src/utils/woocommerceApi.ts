@@ -113,6 +113,7 @@ class WooCommerceAPI {
         const token = localStorage.getItem('wc_jwt_token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
+          console.log('Added JWT token to request');
         }
         return config;
       },
@@ -458,17 +459,19 @@ class WooCommerceAPI {
     order?: string;
   }): Promise<WooCommerceOrder[]> {
     try {
-      console.log('Fetching orders with params:', params);
+      console.log('🔍 Starting order fetch with params:', params);
       
-      // If no customer ID provided, try to get from stored user data
-      if (!params?.customer) {
-        const storedUser = localStorage.getItem('wc_user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          if (userData.customerId) {
-            params = { ...params, customer: userData.customerId };
-            console.log('Using stored customer ID:', userData.customerId);
-          }
+      // Get user data from localStorage
+      const storedUser = localStorage.getItem('wc_user');
+      let finalParams = { ...params };
+      
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        console.log('📱 User data from storage:', userData);
+        
+        if (userData.customerId && !finalParams.customer) {
+          finalParams.customer = userData.customerId;
+          console.log('👤 Using customer ID:', userData.customerId);
         }
       }
       
@@ -477,31 +480,55 @@ class WooCommerceAPI {
         per_page: 20,
         orderby: 'date',
         order: 'desc',
-        ...params
+        ...finalParams
       };
       
-      console.log('Final query params:', queryParams);
+      console.log('🚀 Making API call with params:', queryParams);
+      console.log('🔗 API URL:', `${this.config.baseURL}/orders`);
+      console.log('🔑 Auth headers:', this.api.defaults.auth);
       
       const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
         params: queryParams,
-        timeout: 20000 // Specific timeout for orders
+        timeout: 25000
       });
       
-      console.log('Orders fetched successfully:', response.data);
-      return response.data;
-    } catch (error: any) {
-      console.error('Failed to fetch orders:', error);
+      console.log('✅ Orders API response status:', response.status);
+      console.log('📦 Orders data received:', response.data?.length || 0, 'orders');
+      console.log('🔍 First order sample:', response.data?.[0]);
       
-      // If it's an authentication error or timeout, return empty array
-      if (error.response?.status === 401 || 
-          error.response?.status === 403 || 
-          error.code === 'ECONNABORTED') {
-        console.log('Authentication/timeout issue, returning empty array');
-        return [];
+      return response.data || [];
+    } catch (error: any) {
+      console.error('❌ Orders fetch failed:', error);
+      console.error('📊 Error details:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        code: error.code
+      });
+      
+      // Try alternative approach if customer-specific query fails
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        console.log('🔄 Trying without customer filter...');
+        try {
+          const fallbackParams = {
+            per_page: 20,
+            orderby: 'date',
+            order: 'desc'
+          };
+          
+          const fallbackResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
+            params: fallbackParams,
+            timeout: 25000
+          });
+          
+          console.log('✅ Fallback orders fetch successful:', fallbackResponse.data?.length || 0, 'orders');
+          return fallbackResponse.data || [];
+        } catch (fallbackError) {
+          console.error('❌ Fallback orders fetch also failed:', fallbackError);
+        }
       }
       
-      // For other errors, still return empty array to prevent UI breaking
-      console.log('Other error occurred, returning empty array');
+      // Return empty array to prevent UI breaking
       return [];
     }
   }
@@ -527,15 +554,18 @@ class WooCommerceAPI {
   // Authentication
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
-      console.log('Attempting login with username:', username);
+      console.log('🔐 Attempting login with username:', username);
       
       // Try the JWT auth endpoint first
-      const response = await axios.post(`${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`, {
+      const jwtUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`;
+      console.log('🌐 JWT URL:', jwtUrl);
+      
+      const response = await axios.post(jwtUrl, {
         username,
         password,
       });
       
-      console.log('Login response:', response.data);
+      console.log('✅ JWT Login response:', response.data);
       
       const { token, user_email, user_nicename, user_display_name } = response.data;
       localStorage.setItem('wc_jwt_token', token);
@@ -543,63 +573,52 @@ class WooCommerceAPI {
       // Try to get customer ID
       let customerId;
       try {
+        console.log('🔍 Looking for customer with email:', user_email);
         const customerResponse = await this.api.get('/customers', {
           params: {
             email: user_email,
           }
         });
         
+        console.log('👥 Customer search response:', customerResponse.data);
+        
         if (customerResponse.data && customerResponse.data.length > 0) {
           customerId = customerResponse.data[0].id;
-          console.log('Found customer ID:', customerId);
+          console.log('✅ Found customer ID:', customerId);
+        } else {
+          console.log('⚠️ No customer found with email, trying username...');
+          
+          // Try searching by username
+          const usernameResponse = await this.api.get('/customers', {
+            params: {
+              search: user_nicename,
+            }
+          });
+          
+          if (usernameResponse.data && usernameResponse.data.length > 0) {
+            customerId = usernameResponse.data[0].id;
+            console.log('✅ Found customer ID by username:', customerId);
+          }
         }
       } catch (customerError) {
-        console.log('Could not fetch customer ID:', customerError);
+        console.log('⚠️ Could not fetch customer ID:', customerError);
       }
+      
+      const userData = {
+        email: user_email,
+        username: user_nicename,
+        displayName: user_display_name,
+      };
+      
+      console.log('✅ Final login data:', { userData, customerId });
       
       return {
         token,
-        user: {
-          email: user_email,
-          username: user_nicename,
-          displayName: user_display_name,
-        },
+        user: userData,
         customerId
       };
     } catch (error: any) {
-      console.error('Login error:', error.response?.data || error.message);
-      
-      // Try alternative login method if JWT fails
-      try {
-        console.log('Trying alternative login method...');
-        
-        // Use WooCommerce customer endpoint to verify credentials
-        const customerResponse = await this.api.get('/customers', {
-          params: {
-            email: username.includes('@') ? username : undefined,
-            search: !username.includes('@') ? username : undefined,
-          }
-        });
-        
-        if (customerResponse.data && customerResponse.data.length > 0) {
-          const customer = customerResponse.data[0];
-          // Create a simple token for session management
-          const simpleToken = btoa(`${username}:${Date.now()}`);
-          localStorage.setItem('wc_jwt_token', simpleToken);
-          
-          return {
-            token: simpleToken,
-            user: {
-              email: customer.email,
-              username: customer.username || customer.email,
-              displayName: `${customer.first_name} ${customer.last_name}`.trim() || customer.email,
-            },
-            customerId: customer.id
-          };
-        }
-      } catch (fallbackError) {
-        console.error('Fallback login failed:', fallbackError);
-      }
+      console.error('❌ Login error:', error.response?.data || error.message);
       
       // Check for specific error messages
       if (error.response?.data?.message) {

@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Package, Eye, Loader2 } from 'lucide-react';
+import { Package, Eye, Loader2, RefreshCw } from 'lucide-react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 
 const getStatusColor = (status: string) => {
@@ -34,39 +34,34 @@ const getStatusColor = (status: string) => {
 const Orders = () => {
   const { isAuthenticated, user } = useAuth();
 
-  // Fetch orders from WooCommerce API with better error handling
+  // Fetch orders from WooCommerce API
   const { data: orders = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['orders', user?.customerId || user?.email],
+    queryKey: ['orders', user?.customerId, user?.email],
     queryFn: async () => {
-      try {
-        console.log('Fetching orders for user:', user?.email, 'customer ID:', user?.customerId);
-        
-        const queryParams: any = {
-          per_page: 20,
-          orderby: 'date',
-          order: 'desc'
-        };
-        
-        // If we have a customer ID, use it to filter orders
-        if (user?.customerId) {
-          queryParams.customer = user.customerId;
-        }
-        
-        const fetchedOrders = await wooCommerceApi.getOrders(queryParams);
-        console.log('Orders fetched:', fetchedOrders);
-        return fetchedOrders;
-      } catch (error) {
-        console.error('Failed to fetch orders:', error);
-        // Don't throw error, just return empty array
+      console.log('🔄 Orders query function called');
+      console.log('👤 Current user:', user);
+      
+      if (!user) {
+        console.log('❌ No user available for orders fetch');
         return [];
       }
+      
+      const fetchedOrders = await wooCommerceApi.getOrders({
+        customer: user.customerId,
+        per_page: 20,
+        orderby: 'date',
+        order: 'desc'
+      });
+      
+      console.log('📦 Final orders result:', fetchedOrders);
+      return fetchedOrders;
     },
     enabled: isAuthenticated && !!user,
-    retry: 2,
-    retryDelay: 1000,
+    retry: 1,
+    retryDelay: 2000,
   });
 
-  // Redirect to login if not authenticated
+  // Show authentication message if not logged in
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -98,9 +93,21 @@ const Orders = () => {
       <Navbar />
       
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Order History</h1>
-          <p className="text-gray-600">View and track your previous orders</p>
+        <div className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Order History</h1>
+            <p className="text-gray-600">
+              View and track your orders {user?.email && `for ${user.email}`}
+              {user?.customerId && ` (Customer ID: ${user.customerId})`}
+            </p>
+          </div>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center px-4 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </button>
         </div>
 
         {isLoading ? (
@@ -115,25 +122,31 @@ const Orders = () => {
           <Card>
             <CardContent className="text-center py-16">
               <Package className="mx-auto h-16 w-16 text-red-400 mb-4" />
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Error Loading Orders</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Connection Error</h2>
               <p className="text-gray-600 mb-6">
-                We couldn't load your order history. Please try again later.
+                Unable to connect to WordPress. Please check your connection and try again.
               </p>
-              <button
-                onClick={() => window.location.reload()}
-                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-black hover:bg-gray-800 transition-colors"
-              >
-                Try Again
-              </button>
+              <div className="space-x-4">
+                <button
+                  onClick={() => refetch()}
+                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-black hover:bg-gray-800 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Try Again
+                </button>
+              </div>
             </CardContent>
           </Card>
         ) : orders.length === 0 ? (
           <Card>
             <CardContent className="text-center py-16">
               <Package className="mx-auto h-16 w-16 text-gray-400 mb-4" />
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">No Orders Yet</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">No Orders Found</h2>
               <p className="text-gray-600 mb-6">
-                You haven't placed any orders yet. Start shopping to see your order history here.
+                {user?.customerId ? 
+                  "No orders found for your account. Start shopping to see your order history here." :
+                  "Unable to find your customer account. Please try logging out and back in."
+                }
               </p>
               <Link
                 to="/products"
@@ -145,6 +158,10 @@ const Orders = () => {
           </Card>
         ) : (
           <div className="space-y-6">
+            <div className="text-sm text-gray-500 mb-4">
+              Found {orders.length} order{orders.length !== 1 ? 's' : ''}
+            </div>
+            
             {orders.map((order: any) => (
               <Card key={order.id}>
                 <CardHeader>
@@ -172,24 +189,28 @@ const Orders = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead className="text-center">Quantity</TableHead>
-                        <TableHead className="text-right">Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {order.line_items?.map((item: any, index: number) => (
-                        <TableRow key={index}>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          <TableCell className="text-center">{item.quantity}</TableCell>
-                          <TableCell className="text-right">${parseFloat(item.total).toFixed(2)}</TableCell>
+                  {order.line_items && order.line_items.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="text-center">Quantity</TableHead>
+                          <TableHead className="text-right">Price</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {order.line_items.map((item: any, index: number) => (
+                          <TableRow key={index}>
+                            <TableCell className="font-medium">{item.name}</TableCell>
+                            <TableCell className="text-center">{item.quantity}</TableCell>
+                            <TableCell className="text-right">${parseFloat(item.total).toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="text-gray-500 text-center py-4">No items found in this order</p>
+                  )}
                   
                   <div className="flex justify-between items-center mt-4 pt-4 border-t">
                     <button className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">
