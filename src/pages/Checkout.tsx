@@ -1,31 +1,50 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useCart } from '../context/CartContext';
+import { wooCommerceApi } from '../utils/woocommerceApi';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 
 const Checkout = () => {
   const { cartItems, getCartTotal, clearCart } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
   
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    email: '',
+    email: user?.email || '',
     phone: '',
     address: '',
     city: '',
     state: '',
     zipCode: '',
-    country: '',
+    country: 'US',
     paymentMethod: 'card',
     cardNumber: '',
     expiryDate: '',
     cvv: '',
     nameOnCard: '',
   });
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Handle navigation when cart is empty
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      navigate('/cart');
+    }
+  }, [cartItems.length, navigate]);
+
+  // Update email when user changes
+  useEffect(() => {
+    if (user?.email) {
+      setFormData(prev => ({ ...prev, email: user.email }));
+    }
+  }, [user?.email]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
@@ -34,8 +53,10 @@ const Checkout = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isLoading) return;
     
     // Basic validation
     const requiredFields = ['firstName', 'lastName', 'email', 'address', 'city', 'state', 'zipCode'];
@@ -46,14 +67,82 @@ const Checkout = () => {
       return;
     }
 
-    // Simulate order processing
-    toast.success('Order placed successfully!');
-    clearCart();
-    navigate('/order-success');
+    if (cartItems.length === 0) {
+      toast.error('Your cart is empty');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // Prepare order data for WooCommerce
+      const orderData = {
+        billing: {
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          phone: formData.phone,
+          address_1: formData.address,
+          city: formData.city,
+          state: formData.state,
+          postcode: formData.zipCode,
+          country: formData.country,
+        },
+        shipping: {
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          address_1: formData.address,
+          city: formData.city,
+          state: formData.state,
+          postcode: formData.zipCode,
+          country: formData.country,
+        },
+        line_items: cartItems.map(item => ({
+          product_id: item.id,
+          quantity: item.quantity,
+          name: item.name,
+          total: (item.price * item.quantity).toFixed(2),
+        })),
+        payment_method: formData.paymentMethod,
+        payment_method_title: formData.paymentMethod === 'card' ? 'Credit Card' : 'PayPal',
+      };
+
+      console.log('Creating order with data:', orderData);
+      
+      // Create order via WooCommerce API
+      const order = await wooCommerceApi.createOrder(orderData);
+      
+      console.log('Order created successfully:', order);
+      
+      // Clear cart on successful order
+      await clearCart();
+      
+      toast.success('Order placed successfully!');
+      navigate('/order-success', { 
+        state: { 
+          orderId: order.id || 'unknown',
+          orderNumber: order.number || 'N/A',
+          total: getCartTotal() * 1.1 // including tax
+        } 
+      });
+      
+    } catch (error) {
+      console.error('Order creation failed:', error);
+      
+      let errorMessage = 'Failed to place order. Please try again.';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // Don't render if cart is empty (will redirect via useEffect)
   if (cartItems.length === 0) {
-    navigate('/cart');
     return null;
   }
 
@@ -83,6 +172,7 @@ const Checkout = () => {
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                   <div>
@@ -96,6 +186,7 @@ const Checkout = () => {
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                 </div>
@@ -111,6 +202,7 @@ const Checkout = () => {
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                   <div>
@@ -123,6 +215,7 @@ const Checkout = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={isLoading}
                     />
                   </div>
                 </div>
@@ -143,6 +236,7 @@ const Checkout = () => {
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -157,6 +251,7 @@ const Checkout = () => {
                         onChange={handleInputChange}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
+                        disabled={isLoading}
                       />
                     </div>
                     <div>
@@ -170,6 +265,7 @@ const Checkout = () => {
                         onChange={handleInputChange}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
+                        disabled={isLoading}
                       />
                     </div>
                     <div>
@@ -183,6 +279,7 @@ const Checkout = () => {
                         onChange={handleInputChange}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
+                        disabled={isLoading}
                       />
                     </div>
                   </div>
@@ -202,6 +299,7 @@ const Checkout = () => {
                       value={formData.paymentMethod}
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={isLoading}
                     >
                       <option value="card">Credit/Debit Card</option>
                       <option value="paypal">PayPal</option>
@@ -221,6 +319,7 @@ const Checkout = () => {
                           onChange={handleInputChange}
                           placeholder="1234 5678 9012 3456"
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          disabled={isLoading}
                         />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -235,6 +334,7 @@ const Checkout = () => {
                             onChange={handleInputChange}
                             placeholder="MM/YY"
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            disabled={isLoading}
                           />
                         </div>
                         <div>
@@ -248,6 +348,7 @@ const Checkout = () => {
                             onChange={handleInputChange}
                             placeholder="123"
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            disabled={isLoading}
                           />
                         </div>
                         <div>
@@ -260,6 +361,7 @@ const Checkout = () => {
                             value={formData.nameOnCard}
                             onChange={handleInputChange}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            disabled={isLoading}
                           />
                         </div>
                       </div>
@@ -270,9 +372,10 @@ const Checkout = () => {
 
               <button
                 type="submit"
-                className="w-full bg-black text-white py-4 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+                disabled={isLoading || cartItems.length === 0}
+                className="w-full bg-black text-white py-4 rounded-lg font-semibold hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
-                Place Order
+                {isLoading ? 'Processing Order...' : 'Place Order'}
               </button>
             </form>
           </div>
