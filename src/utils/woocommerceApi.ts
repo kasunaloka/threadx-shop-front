@@ -51,7 +51,19 @@ export interface WooCommerceCartItem {
 
 export interface WooCommerceOrder {
   id?: number;
+  number?: string;
   status?: string;
+  date_created?: string;
+  total?: string;
+  customer_id?: number;
+  line_items?: Array<{
+    id?: number;
+    name: string;
+    quantity: number;
+    total: string;
+    product_id: number;
+    variation_id?: number;
+  }>;
   billing: {
     first_name: string;
     last_name: string;
@@ -72,11 +84,6 @@ export interface WooCommerceOrder {
     postcode: string;
     country: string;
   };
-  line_items: Array<{
-    product_id: number;
-    quantity: number;
-    variation_id?: number;
-  }>;
   payment_method: string;
   payment_method_title: string;
 }
@@ -450,10 +457,30 @@ class WooCommerceAPI {
   }): Promise<WooCommerceOrder[]> {
     try {
       console.log('Fetching orders with params:', params);
+      
+      // If no customer ID provided, try to get from stored user data
+      if (!params?.customer) {
+        const storedUser = localStorage.getItem('wc_user');
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          if (userData.customerId) {
+            params = { ...params, customer: userData.customerId };
+          }
+        }
+      }
+      
       const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { params });
+      console.log('Orders fetched successfully:', response.data);
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch orders:', error);
+      
+      // If it's an authentication error, return empty array
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        console.log('Authentication required for orders, returning empty array');
+        return [];
+      }
+      
       throw new Error('Failed to fetch orders');
     }
   }
@@ -477,7 +504,7 @@ class WooCommerceAPI {
   }
 
   // Authentication
-  async login(username: string, password: string): Promise<{ token: string; user: any }> {
+  async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
       console.log('Attempting login with username:', username);
       
@@ -492,6 +519,23 @@ class WooCommerceAPI {
       const { token, user_email, user_nicename, user_display_name } = response.data;
       localStorage.setItem('wc_jwt_token', token);
       
+      // Try to get customer ID
+      let customerId;
+      try {
+        const customerResponse = await this.api.get('/customers', {
+          params: {
+            email: user_email,
+          }
+        });
+        
+        if (customerResponse.data && customerResponse.data.length > 0) {
+          customerId = customerResponse.data[0].id;
+          console.log('Found customer ID:', customerId);
+        }
+      } catch (customerError) {
+        console.log('Could not fetch customer ID:', customerError);
+      }
+      
       return {
         token,
         user: {
@@ -499,6 +543,7 @@ class WooCommerceAPI {
           username: user_nicename,
           displayName: user_display_name,
         },
+        customerId
       };
     } catch (error: any) {
       console.error('Login error:', error.response?.data || error.message);
@@ -528,6 +573,7 @@ class WooCommerceAPI {
               username: customer.username || customer.email,
               displayName: `${customer.first_name} ${customer.last_name}`.trim() || customer.email,
             },
+            customerId: customer.id
           };
         }
       } catch (fallbackError) {

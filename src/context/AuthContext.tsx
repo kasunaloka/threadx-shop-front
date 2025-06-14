@@ -1,11 +1,14 @@
+
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
 
 interface User {
+  id?: number;
   email: string;
   username: string;
   displayName: string;
+  customerId?: number;
 }
 
 interface AuthState {
@@ -86,9 +89,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const isValid = await wooCommerceApi.validateToken();
         if (isValid) {
-          // If token is valid, we should fetch user data
-          // For now, we'll just set as authenticated
-          dispatch({ type: 'LOGIN_SUCCESS', payload: { email: '', username: '', displayName: '' } });
+          // Try to get stored user data
+          const storedUser = localStorage.getItem('wc_user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+          } else {
+            dispatch({ type: 'LOGIN_FAILURE' });
+          }
         } else {
           dispatch({ type: 'LOGIN_FAILURE' });
         }
@@ -105,10 +113,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     try {
       console.log('AuthContext: Starting login process...');
-      const { user } = await wooCommerceApi.login(username, password);
-      console.log('AuthContext: Login successful, user:', user);
+      const { user, customerId } = await wooCommerceApi.login(username, password);
+      console.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
       
-      dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+      const userData = {
+        ...user,
+        customerId: customerId || undefined
+      };
+      
+      // Store user data in localStorage
+      localStorage.setItem('wc_user', JSON.stringify(userData));
+      
+      dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
       toast.success('Login successful!');
       return true;
     } catch (error: any) {
@@ -158,6 +174,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     wooCommerceApi.logout();
+    localStorage.removeItem('wc_user');
     dispatch({ type: 'LOGOUT' });
     toast.success('Logged out successfully!');
   };

@@ -36,17 +36,25 @@ const Orders = () => {
 
   // Fetch orders from WooCommerce API
   const { data: orders = [], isLoading, error } = useQuery({
-    queryKey: ['orders', user?.email],
+    queryKey: ['orders', user?.customerId || user?.email],
     queryFn: async () => {
       try {
-        console.log('Fetching orders for user:', user?.email);
+        console.log('Fetching orders for user:', user?.email, 'customer ID:', user?.customerId);
         
-        // Since we don't have a direct way to get orders by user email in WooCommerce REST API
-        // without authentication, we'll simulate fetching user orders
-        // In a real implementation, you'd need proper authentication and user association
+        const queryParams: any = {
+          per_page: 20,
+          orderby: 'date',
+          order: 'desc'
+        };
         
-        // For now, return empty array - in production you'd implement proper order fetching
-        return [];
+        // If we have a customer ID, use it to filter orders
+        if (user?.customerId) {
+          queryParams.customer = user.customerId;
+        }
+        
+        const fetchedOrders = await wooCommerceApi.getOrders(queryParams);
+        console.log('Orders fetched:', fetchedOrders);
+        return fetchedOrders;
       } catch (error) {
         console.error('Failed to fetch orders:', error);
         throw error;
