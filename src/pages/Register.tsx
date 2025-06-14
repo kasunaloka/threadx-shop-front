@@ -1,9 +1,9 @@
-
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-toastify';
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -27,27 +27,54 @@ const Register = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.firstName || !formData.lastName || !formData.username || !formData.email || !formData.password) {
+    console.log('Form submitted with data:', formData);
+    
+    // Validation
+    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.username.trim() || !formData.email.trim() || !formData.password.trim()) {
+      toast.error('Please fill in all required fields.');
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
+      toast.error('Passwords do not match.');
       return;
     }
 
     if (formData.password.length < 8) {
+      toast.error('Password must be at least 8 characters long.');
       return;
     }
 
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      toast.error('Please enter a valid email address.');
+      return;
+    }
+
+    // Username validation (no special characters, minimum length)
+    if (formData.username.length < 3) {
+      toast.error('Username must be at least 3 characters long.');
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      toast.error('Username can only contain letters, numbers, and underscores.');
+      return;
+    }
+
+    console.log('Validation passed, attempting registration...');
+
     const success = await register({
-      username: formData.username,
-      email: formData.email,
+      username: formData.username.trim(),
+      email: formData.email.trim().toLowerCase(),
       password: formData.password,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
+      firstName: formData.firstName.trim(),
+      lastName: formData.lastName.trim(),
     });
 
     if (success) {
+      console.log('Registration successful, redirecting to login...');
       navigate('/login');
     }
   };

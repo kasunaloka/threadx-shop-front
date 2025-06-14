@@ -381,10 +381,41 @@ class WooCommerceAPI {
     last_name?: string;
   }): Promise<any> {
     try {
-      const response = await axios.post(`${this.config.baseURL}/wp-json/wp/v2/users`, userData);
+      console.log('Attempting registration with data:', userData);
+      
+      // Use the WooCommerce REST API customers endpoint
+      const response = await this.api.post('/customers', {
+        username: userData.username,
+        email: userData.email,
+        password: userData.password,
+        first_name: userData.first_name || '',
+        last_name: userData.last_name || '',
+        billing: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          email: userData.email,
+        },
+        shipping: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+        }
+      });
+      
+      console.log('Registration successful:', response.data);
       return response.data;
-    } catch (error) {
-      throw new Error('Registration failed');
+    } catch (error: any) {
+      console.error('Registration error details:', error.response?.data || error.message);
+      
+      // Check for specific error messages
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      } else if (error.response?.data?.code === 'registration-error-email-exists') {
+        throw new Error('An account with this email already exists.');
+      } else if (error.response?.data?.code === 'registration-error-username-exists') {
+        throw new Error('This username is already taken.');
+      }
+      
+      throw new Error('Registration failed. Please check your information and try again.');
     }
   }
 

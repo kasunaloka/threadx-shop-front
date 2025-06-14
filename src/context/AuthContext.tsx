@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
@@ -126,6 +125,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
+      console.log('Starting registration process...');
+      
       await wooCommerceApi.register({
         username: userData.username,
         email: userData.email,
@@ -135,11 +136,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       
       dispatch({ type: 'SET_LOADING', payload: false });
-      toast.success('Registration successful! Please login.');
+      toast.success('Registration successful! You can now log in.');
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Registration failed:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
-      toast.error('Registration failed. Please try again.');
+      
+      // Show the specific error message
+      const errorMessage = error.message || 'Registration failed. Please try again.';
+      toast.error(errorMessage);
       return false;
     }
   };
