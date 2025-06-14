@@ -1,9 +1,17 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, LogOut, Menu, X } from 'lucide-react';
+import { ShoppingCart, User, LogOut, Menu, X, ChevronDown } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -65,19 +73,34 @@ const Navbar = () => {
                 >
                   Orders
                 </Link>
-                <div className="flex items-center space-x-2 px-3 py-2 bg-gray-50 rounded-md">
-                  <User size={16} className="text-gray-600" />
-                  <span className="text-sm text-gray-700 font-medium">
-                    {user?.displayName || user?.username || 'User'}
-                  </span>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-red-600 transition-colors px-3 py-2 rounded-md hover:bg-red-50"
-                >
-                  <LogOut size={16} />
-                  <span className="text-sm font-medium">Logout</span>
-                </button>
+                
+                {/* Account Dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="flex items-center space-x-2 px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                    <User size={16} className="text-gray-600" />
+                    <span className="text-sm text-gray-700 font-medium">
+                      {user?.displayName || user?.username || 'User'}
+                    </span>
+                    <ChevronDown size={14} className="text-gray-500" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 bg-white border border-gray-200 shadow-lg">
+                    <DropdownMenuLabel className="px-2 py-1.5 text-sm font-semibold text-gray-900">
+                      My Account
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+                      <User className="mr-2 h-4 w-4" />
+                      Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={handleLogout}
+                      className="px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 cursor-pointer"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             ) : (
               <Link 
