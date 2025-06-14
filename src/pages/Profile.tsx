@@ -19,6 +19,49 @@ const Profile = () => {
     email: user?.email || '',
     username: user?.username || '',
   });
+  const [formErrors, setFormErrors] = useState({
+    displayName: '',
+    email: '',
+    username: '',
+  });
+
+  // Update form data when user changes
+  React.useEffect(() => {
+    if (user) {
+      setFormData({
+        displayName: user.displayName || '',
+        email: user.email || '',
+        username: user.username || '',
+      });
+    }
+  }, [user]);
+
+  const validateForm = () => {
+    const errors = {
+      displayName: '',
+      email: '',
+      username: '',
+    };
+
+    if (!formData.displayName.trim()) {
+      errors.displayName = 'Display name is required';
+    }
+
+    if (!formData.email.trim()) {
+      errors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      errors.email = 'Email is invalid';
+    }
+
+    if (!formData.username.trim()) {
+      errors.username = 'Username is required';
+    } else if (formData.username.length < 3) {
+      errors.username = 'Username must be at least 3 characters';
+    }
+
+    setFormErrors(errors);
+    return Object.values(errors).every(error => error === '');
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -26,21 +69,55 @@ const Profile = () => {
       ...prev,
       [name]: value
     }));
+
+    // Clear error when user starts typing
+    if (formErrors[name as keyof typeof formErrors]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [name]: ''
+      }));
+    }
   };
 
   const handleSave = () => {
+    if (!validateForm()) {
+      toast.error('Please fix the errors before saving');
+      return;
+    }
+
     // Here you would typically make an API call to update the user profile
-    toast.success('Profile updated successfully!');
-    setIsEditing(false);
+    console.log('Saving profile data:', formData);
+    
+    // Simulate API call
+    setTimeout(() => {
+      toast.success('Profile updated successfully!');
+      setIsEditing(false);
+    }, 500);
   };
 
   const handleCancel = () => {
+    // Reset form data to original values
     setFormData({
       displayName: user?.displayName || '',
       email: user?.email || '',
       username: user?.username || '',
     });
+    setFormErrors({
+      displayName: '',
+      email: '',
+      username: '',
+    });
     setIsEditing(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+    // Clear any existing errors
+    setFormErrors({
+      displayName: '',
+      email: '',
+      username: '',
+    });
   };
 
   // Show authentication message if not logged in
@@ -92,7 +169,7 @@ const Profile = () => {
                 <CardTitle className="text-xl font-semibold">Profile Information</CardTitle>
                 {!isEditing ? (
                   <Button
-                    onClick={() => setIsEditing(true)}
+                    onClick={handleEdit}
                     variant="outline"
                     size="sm"
                     className="flex items-center gap-2"
@@ -147,12 +224,18 @@ const Profile = () => {
                     Display Name
                   </label>
                   {isEditing ? (
-                    <Input
-                      name="displayName"
-                      value={formData.displayName}
-                      onChange={handleInputChange}
-                      placeholder="Enter your display name"
-                    />
+                    <div>
+                      <Input
+                        name="displayName"
+                        value={formData.displayName}
+                        onChange={handleInputChange}
+                        placeholder="Enter your display name"
+                        className={formErrors.displayName ? 'border-red-500' : ''}
+                      />
+                      {formErrors.displayName && (
+                        <p className="text-red-500 text-sm mt-1">{formErrors.displayName}</p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
                       {user?.displayName || 'Not set'}
@@ -165,12 +248,18 @@ const Profile = () => {
                     Username
                   </label>
                   {isEditing ? (
-                    <Input
-                      name="username"
-                      value={formData.username}
-                      onChange={handleInputChange}
-                      placeholder="Enter your username"
-                    />
+                    <div>
+                      <Input
+                        name="username"
+                        value={formData.username}
+                        onChange={handleInputChange}
+                        placeholder="Enter your username"
+                        className={formErrors.username ? 'border-red-500' : ''}
+                      />
+                      {formErrors.username && (
+                        <p className="text-red-500 text-sm mt-1">{formErrors.username}</p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
                       {user?.username || 'Not set'}
@@ -183,13 +272,19 @@ const Profile = () => {
                     Email Address
                   </label>
                   {isEditing ? (
-                    <Input
-                      name="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      placeholder="Enter your email"
-                    />
+                    <div>
+                      <Input
+                        name="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={handleInputChange}
+                        placeholder="Enter your email"
+                        className={formErrors.email ? 'border-red-500' : ''}
+                      />
+                      {formErrors.email && (
+                        <p className="text-red-500 text-sm mt-1">{formErrors.email}</p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md flex items-center">
                       <Mail className="w-4 h-4 mr-2 text-gray-500" />
