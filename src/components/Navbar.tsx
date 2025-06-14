@@ -1,17 +1,24 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, User, LogOut } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { cartItems } = useCart();
+  const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
 
   const cartItemsCount = cartItems.reduce((total, item) => total + item.quantity, 0);
 
   const isActive = (path: string) => location.pathname === path;
+
+  const handleLogout = () => {
+    logout();
+    setIsMenuOpen(false);
+  };
 
   return (
     <nav className="bg-white shadow-sm border-b sticky top-0 z-50">
@@ -40,14 +47,35 @@ const Navbar = () => {
             >
               Products
             </Link>
-            <Link 
-              to="/login" 
-              className={`font-medium transition-colors ${
-                isActive('/login') ? 'text-blue-600' : 'text-gray-700 hover:text-blue-600'
-              }`}
-            >
-              Login
-            </Link>
+            
+            {/* Authentication Section */}
+            {isAuthenticated ? (
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <User size={16} className="text-gray-600" />
+                  <span className="text-sm text-gray-700">
+                    {user?.displayName || user?.username || 'User'}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors"
+                >
+                  <LogOut size={16} />
+                  <span className="text-sm">Logout</span>
+                </button>
+              </div>
+            ) : (
+              <Link 
+                to="/login" 
+                className={`font-medium transition-colors ${
+                  isActive('/login') ? 'text-blue-600' : 'text-gray-700 hover:text-blue-600'
+                }`}
+              >
+                Login
+              </Link>
+            )}
+            
             <Link 
               to="/cart" 
               className="relative p-2 text-gray-700 hover:text-blue-600 transition-colors"
@@ -78,7 +106,27 @@ const Navbar = () => {
             <div className="flex flex-col space-y-4">
               <Link to="/" className="text-gray-700 hover:text-blue-600 font-medium">Home</Link>
               <Link to="/products" className="text-gray-700 hover:text-blue-600 font-medium">Products</Link>
-              <Link to="/login" className="text-gray-700 hover:text-blue-600 font-medium">Login</Link>
+              
+              {isAuthenticated ? (
+                <>
+                  <div className="flex items-center space-x-2 text-gray-700">
+                    <User size={16} />
+                    <span className="text-sm">
+                      {user?.displayName || user?.username || 'User'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 font-medium"
+                  >
+                    <LogOut size={16} />
+                    <span>Logout</span>
+                  </button>
+                </>
+              ) : (
+                <Link to="/login" className="text-gray-700 hover:text-blue-600 font-medium">Login</Link>
+              )}
+              
               <Link to="/cart" className="flex items-center text-gray-700 hover:text-blue-600 font-medium">
                 <ShoppingCart size={20} className="mr-2" />
                 Cart ({cartItemsCount})
