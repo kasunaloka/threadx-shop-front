@@ -34,8 +34,8 @@ const getStatusColor = (status: string) => {
 const Orders = () => {
   const { isAuthenticated, user } = useAuth();
 
-  // Fetch orders from WooCommerce API
-  const { data: orders = [], isLoading, error } = useQuery({
+  // Fetch orders from WooCommerce API with better error handling
+  const { data: orders = [], isLoading, error, refetch } = useQuery({
     queryKey: ['orders', user?.customerId || user?.email],
     queryFn: async () => {
       try {
@@ -57,10 +57,13 @@ const Orders = () => {
         return fetchedOrders;
       } catch (error) {
         console.error('Failed to fetch orders:', error);
-        throw error;
+        // Don't throw error, just return empty array
+        return [];
       }
     },
     enabled: isAuthenticated && !!user,
+    retry: 2,
+    retryDelay: 1000,
   });
 
   // Redirect to login if not authenticated

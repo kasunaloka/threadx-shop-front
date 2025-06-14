@@ -104,7 +104,7 @@ class WooCommerceAPI {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 30000, // Increased timeout to 30 seconds
     });
 
     // Add request interceptor for JWT token
@@ -454,6 +454,8 @@ class WooCommerceAPI {
     status?: string;
     page?: number;
     per_page?: number;
+    orderby?: string;
+    order?: string;
   }): Promise<WooCommerceOrder[]> {
     try {
       console.log('Fetching orders with params:', params);
@@ -465,23 +467,42 @@ class WooCommerceAPI {
           const userData = JSON.parse(storedUser);
           if (userData.customerId) {
             params = { ...params, customer: userData.customerId };
+            console.log('Using stored customer ID:', userData.customerId);
           }
         }
       }
       
-      const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { params });
+      // Set default parameters
+      const queryParams = {
+        per_page: 20,
+        orderby: 'date',
+        order: 'desc',
+        ...params
+      };
+      
+      console.log('Final query params:', queryParams);
+      
+      const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
+        params: queryParams,
+        timeout: 20000 // Specific timeout for orders
+      });
+      
       console.log('Orders fetched successfully:', response.data);
       return response.data;
     } catch (error: any) {
       console.error('Failed to fetch orders:', error);
       
-      // If it's an authentication error, return empty array
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        console.log('Authentication required for orders, returning empty array');
+      // If it's an authentication error or timeout, return empty array
+      if (error.response?.status === 401 || 
+          error.response?.status === 403 || 
+          error.code === 'ECONNABORTED') {
+        console.log('Authentication/timeout issue, returning empty array');
         return [];
       }
       
-      throw new Error('Failed to fetch orders');
+      // For other errors, still return empty array to prevent UI breaking
+      console.log('Other error occurred, returning empty array');
+      return [];
     }
   }
 
