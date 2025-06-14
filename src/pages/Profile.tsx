@@ -1,124 +1,15 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useAuth } from '../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
-import { User, Mail, Edit3, Save, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { User, Mail } from 'lucide-react';
 
 const Profile = () => {
   const { isAuthenticated, user } = useAuth();
-  const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({
-    displayName: user?.displayName || '',
-    email: user?.email || '',
-    username: user?.username || '',
-  });
-  const [formErrors, setFormErrors] = useState({
-    displayName: '',
-    email: '',
-    username: '',
-  });
-
-  // Update form data when user changes
-  React.useEffect(() => {
-    if (user) {
-      setFormData({
-        displayName: user.displayName || '',
-        email: user.email || '',
-        username: user.username || '',
-      });
-    }
-  }, [user]);
-
-  const validateForm = () => {
-    const errors = {
-      displayName: '',
-      email: '',
-      username: '',
-    };
-
-    if (!formData.displayName.trim()) {
-      errors.displayName = 'Display name is required';
-    }
-
-    if (!formData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      errors.email = 'Email is invalid';
-    }
-
-    if (!formData.username.trim()) {
-      errors.username = 'Username is required';
-    } else if (formData.username.length < 3) {
-      errors.username = 'Username must be at least 3 characters';
-    }
-
-    setFormErrors(errors);
-    return Object.values(errors).every(error => error === '');
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-
-    // Clear error when user starts typing
-    if (formErrors[name as keyof typeof formErrors]) {
-      setFormErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
-    }
-  };
-
-  const handleSave = () => {
-    if (!validateForm()) {
-      toast.error('Please fix the errors before saving');
-      return;
-    }
-
-    // Here you would typically make an API call to update the user profile
-    console.log('Saving profile data:', formData);
-    
-    // Simulate API call
-    setTimeout(() => {
-      toast.success('Profile updated successfully!');
-      setIsEditing(false);
-    }, 500);
-  };
-
-  const handleCancel = () => {
-    // Reset form data to original values
-    setFormData({
-      displayName: user?.displayName || '',
-      email: user?.email || '',
-      username: user?.username || '',
-    });
-    setFormErrors({
-      displayName: '',
-      email: '',
-      username: '',
-    });
-    setIsEditing(false);
-  };
-
-  const handleEdit = () => {
-    setIsEditing(true);
-    // Clear any existing errors
-    setFormErrors({
-      displayName: '',
-      email: '',
-      username: '',
-    });
-  };
 
   // Show authentication message if not logged in
   if (!isAuthenticated) {
@@ -158,47 +49,14 @@ const Profile = () => {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">My Profile</h1>
-          <p className="text-gray-600">Manage your account information</p>
+          <p className="text-gray-600">View your account information</p>
         </div>
 
         <div className="space-y-6">
           {/* Profile Information Card */}
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle className="text-xl font-semibold">Profile Information</CardTitle>
-                {!isEditing ? (
-                  <Button
-                    onClick={handleEdit}
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    Edit
-                  </Button>
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleSave}
-                      size="sm"
-                      className="flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" />
-                      Save
-                    </Button>
-                    <Button
-                      onClick={handleCancel}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center gap-2"
-                    >
-                      <X className="w-4 h-4" />
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-              </div>
+              <CardTitle className="text-xl font-semibold">Profile Information</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center space-x-6 mb-6">
@@ -223,74 +81,28 @@ const Profile = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Display Name
                   </label>
-                  {isEditing ? (
-                    <div>
-                      <Input
-                        name="displayName"
-                        value={formData.displayName}
-                        onChange={handleInputChange}
-                        placeholder="Enter your display name"
-                        className={formErrors.displayName ? 'border-red-500' : ''}
-                      />
-                      {formErrors.displayName && (
-                        <p className="text-red-500 text-sm mt-1">{formErrors.displayName}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
-                      {user?.displayName || 'Not set'}
-                    </p>
-                  )}
+                  <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
+                    {user?.displayName || 'Not set'}
+                  </p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Username
                   </label>
-                  {isEditing ? (
-                    <div>
-                      <Input
-                        name="username"
-                        value={formData.username}
-                        onChange={handleInputChange}
-                        placeholder="Enter your username"
-                        className={formErrors.username ? 'border-red-500' : ''}
-                      />
-                      {formErrors.username && (
-                        <p className="text-red-500 text-sm mt-1">{formErrors.username}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
-                      {user?.username || 'Not set'}
-                    </p>
-                  )}
+                  <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md">
+                    {user?.username || 'Not set'}
+                  </p>
                 </div>
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Email Address
                   </label>
-                  {isEditing ? (
-                    <div>
-                      <Input
-                        name="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        placeholder="Enter your email"
-                        className={formErrors.email ? 'border-red-500' : ''}
-                      />
-                      {formErrors.email && (
-                        <p className="text-red-500 text-sm mt-1">{formErrors.email}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md flex items-center">
-                      <Mail className="w-4 h-4 mr-2 text-gray-500" />
-                      {user?.email || 'Not set'}
-                    </p>
-                  )}
+                  <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md flex items-center">
+                    <Mail className="w-4 h-4 mr-2 text-gray-500" />
+                    {user?.email || 'Not set'}
+                  </p>
                 </div>
               </div>
             </CardContent>
