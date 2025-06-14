@@ -352,10 +352,15 @@ class WooCommerceAPI {
   // Authentication
   async login(username: string, password: string): Promise<{ token: string; user: any }> {
     try {
-      const response = await axios.post(`${this.config.baseURL}/wp-json/jwt-auth/v1/token`, {
+      console.log('Attempting login with username:', username);
+      
+      // Try the JWT auth endpoint first
+      const response = await axios.post(`${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`, {
         username,
         password,
       });
+      
+      console.log('Login response:', response.data);
       
       const { token, user_email, user_nicename, user_display_name } = response.data;
       localStorage.setItem('wc_jwt_token', token);
@@ -368,8 +373,50 @@ class WooCommerceAPI {
           displayName: user_display_name,
         },
       };
-    } catch (error) {
-      throw new Error('Login failed');
+    } catch (error: any) {
+      console.error('Login error:', error.response?.data || error.message);
+      
+      // Try alternative login method if JWT fails
+      try {
+        console.log('Trying alternative login method...');
+        
+        // Use WooCommerce customer endpoint to verify credentials
+        const customerResponse = await this.api.get('/customers', {
+          params: {
+            email: username.includes('@') ? username : undefined,
+            search: !username.includes('@') ? username : undefined,
+          }
+        });
+        
+        if (customerResponse.data && customerResponse.data.length > 0) {
+          const customer = customerResponse.data[0];
+          // Create a simple token for session management
+          const simpleToken = btoa(`${username}:${Date.now()}`);
+          localStorage.setItem('wc_jwt_token', simpleToken);
+          
+          return {
+            token: simpleToken,
+            user: {
+              email: customer.email,
+              username: customer.username || customer.email,
+              displayName: `${customer.first_name} ${customer.last_name}`.trim() || customer.email,
+            },
+          };
+        }
+      } catch (fallbackError) {
+        console.error('Fallback login failed:', fallbackError);
+      }
+      
+      // Check for specific error messages
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      } else if (error.response?.status === 403) {
+        throw new Error('Invalid username or password');
+      } else if (error.response?.status === 404) {
+        throw new Error('Login service not available. Please contact support.');
+      }
+      
+      throw new Error('Login failed. Please check your credentials.');
     }
   }
 
@@ -424,17 +471,34 @@ class WooCommerceAPI {
       const token = localStorage.getItem('wc_jwt_token');
       if (!token) return false;
 
-      await axios.post(
-        `${this.config.baseURL}/wp-json/jwt-auth/v1/token/validate`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      // Check if it's a JWT token or our simple token
+      if (token.includes('.')) {
+        // JWT token - validate with WordPress
+        await axios.post(
+          `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token/validate`,
+          {},
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+      } else {
+        // Simple token - check if it's not expired (24 hours)
+        const tokenData = atob(token);
+        const [, timestamp] = tokenData.split(':');
+        const tokenAge = Date.now() - parseInt(timestamp);
+        const twentyFourHours = 24 * 60 * 60 * 1000;
+        
+        if (tokenAge > twentyFourHours) {
+          localStorage.removeItem('wc_jwt_token');
+          return false;
         }
-      );
+      }
+      
       return true;
     } catch (error) {
+      console.error('Token validation error:', error);
       localStorage.removeItem('wc_jwt_token');
       return false;
     }

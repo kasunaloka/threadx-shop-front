@@ -104,13 +104,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'LOGIN_START' });
     
     try {
+      console.log('AuthContext: Starting login process...');
       const { user } = await wooCommerceApi.login(username, password);
+      console.log('AuthContext: Login successful, user:', user);
+      
       dispatch({ type: 'LOGIN_SUCCESS', payload: user });
       toast.success('Login successful!');
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      console.error('AuthContext: Login failed:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
-      toast.error('Login failed. Please check your credentials.');
+      
+      // Show specific error message
+      const errorMessage = error.message || 'Login failed. Please check your credentials.';
+      toast.error(errorMessage);
       return false;
     }
   };
