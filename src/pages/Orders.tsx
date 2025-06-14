@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Package, Eye, Loader2, RefreshCw } from 'lucide-react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
+import { logger } from '../utils/logger';
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -34,31 +35,61 @@ const getStatusColor = (status: string) => {
 const Orders = () => {
   const { isAuthenticated, user } = useAuth();
 
-  // Fetch orders from WooCommerce API
+  // Fetch orders with improved error handling and retry logic
   const { data: orders = [], isLoading, error, refetch } = useQuery({
     queryKey: ['orders', user?.customerId, user?.email],
     queryFn: async () => {
-      console.log('🔄 Orders query function called');
-      console.log('👤 Current user:', user);
+      logger.log('🔄 Fetching orders for user:', user);
       
       if (!user) {
-        console.log('❌ No user available for orders fetch');
+        logger.log('❌ No user available for orders fetch');
         return [];
       }
       
-      const fetchedOrders = await wooCommerceApi.getOrders({
-        customer: user.customerId,
-        per_page: 20,
-        orderby: 'date',
-        order: 'desc'
-      });
-      
-      console.log('📦 Final orders result:', fetchedOrders);
-      return fetchedOrders;
+      try {
+        // Try with customer ID first if available
+        let fetchedOrders = [];
+        
+        if (user.customerId) {
+          logger.log('👤 Fetching orders with customer ID:', user.customerId);
+          fetchedOrders = await wooCommerceApi.getOrders({
+            customer: user.customerId,
+            per_page: 20,
+            orderby: 'date',
+            order: 'desc'
+          });
+        }
+        
+        // If no orders found with customer ID, try without customer filter
+        if (fetchedOrders.length === 0) {
+          logger.log('🔄 No orders found with customer ID, trying general fetch');
+          fetchedOrders = await wooCommerceApi.getOrders({
+            per_page: 20,
+            orderby: 'date',
+            order: 'desc'
+          });
+          
+          // Filter by email if we have orders
+          if (fetchedOrders.length > 0 && user.email) {
+            logger.log('📧 Filtering orders by email:', user.email);
+            fetchedOrders = fetchedOrders.filter(order => 
+              order.billing?.email === user.email ||
+              order.customer_id === user.customerId
+            );
+          }
+        }
+        
+        logger.log('📦 Final orders result:', fetchedOrders.length, 'orders');
+        return fetchedOrders;
+      } catch (error) {
+        logger.error('❌ Error fetching orders:', error);
+        throw error;
+      }
     },
     enabled: isAuthenticated && !!user,
-    retry: 1,
-    retryDelay: 2000,
+    retry: 2,
+    retryDelay: 3000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   // Show authentication message if not logged in
@@ -97,15 +128,17 @@ const Orders = () => {
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Order History</h1>
             <p className="text-gray-600">
-              View and track your orders {user?.email && `for ${user.email}`}
+              View and track your orders
+              {user?.email && ` for ${user.email}`}
               {user?.customerId && ` (Customer ID: ${user.customerId})`}
             </p>
           </div>
           <button
             onClick={() => refetch()}
-            className="inline-flex items-center px-4 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            disabled={isLoading}
+            className="inline-flex items-center px-4 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            <RefreshCw className="w-4 h-4 mr-2" />
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
@@ -122,10 +155,15 @@ const Orders = () => {
           <Card>
             <CardContent className="text-center py-16">
               <Package className="mx-auto h-16 w-16 text-red-400 mb-4" />
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Connection Error</h2>
-              <p className="text-gray-600 mb-6">
-                Unable to connect to WordPress. Please check your connection and try again.
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Unable to Load Orders</h2>
+              <p className="text-gray-600 mb-4">
+                There was an error loading your order history. This could be due to:
               </p>
+              <ul className="text-sm text-gray-500 mb-6 space-y-1">
+                <li>• Connection issues with the server</li>
+                <li>• Authentication problems</li>
+                <li>• Server maintenance</li>
+              </ul>
               <div className="space-x-4">
                 <button
                   onClick={() => refetch()}
@@ -134,6 +172,12 @@ const Orders = () => {
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Try Again
                 </button>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                >
+                  Re-login
+                </Link>
               </div>
             </CardContent>
           </Card>
@@ -145,15 +189,29 @@ const Orders = () => {
               <p className="text-gray-600 mb-6">
                 {user?.customerId ? 
                   "No orders found for your account. Start shopping to see your order history here." :
-                  "Unable to find your customer account. Please try logging out and back in."
+                  "Unable to find your customer account. Try logging out and back in, or contact support."
                 }
               </p>
-              <Link
-                to="/products"
-                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-black hover:bg-gray-800 transition-colors"
-              >
-                Start Shopping
-              </Link>
+              <div className="space-x-4">
+                <Link
+                  to="/products"
+                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-black hover:bg-gray-800 transition-colors"
+                >
+                  Start Shopping
+                </Link>
+                {!user?.customerId && (
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('wc_user');
+                      localStorage.removeItem('wc_jwt_token');
+                      window.location.href = '/login';
+                    }}
+                    className="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                  >
+                    Re-login
+                  </button>
+                )}
+              </div>
             </CardContent>
           </Card>
         ) : (
@@ -174,7 +232,9 @@ const Orders = () => {
                         Placed on {new Date(order.date_created).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
-                          day: 'numeric'
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
                         })}
                       </p>
                     </div>
@@ -183,7 +243,7 @@ const Orders = () => {
                         {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                       </Badge>
                       <p className="text-lg font-semibold mt-2">
-                        ${parseFloat(order.total).toFixed(2)}
+                        ${parseFloat(order.total || '0').toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -203,7 +263,7 @@ const Orders = () => {
                           <TableRow key={index}>
                             <TableCell className="font-medium">{item.name}</TableCell>
                             <TableCell className="text-center">{item.quantity}</TableCell>
-                            <TableCell className="text-right">${parseFloat(item.total).toFixed(2)}</TableCell>
+                            <TableCell className="text-right">${parseFloat(item.total || '0').toFixed(2)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -213,13 +273,15 @@ const Orders = () => {
                   )}
                   
                   <div className="flex justify-between items-center mt-4 pt-4 border-t">
-                    <button className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors">
-                      <Eye className="w-4 h-4 mr-1" />
-                      View Details
-                    </button>
+                    <div className="text-sm text-gray-500">
+                      Order ID: {order.id}
+                      {order.payment_method_title && (
+                        <span className="ml-4">Payment: {order.payment_method_title}</span>
+                      )}
+                    </div>
                     <div className="text-right">
                       <p className="text-sm text-gray-600">Total</p>
-                      <p className="text-lg font-semibold">${parseFloat(order.total).toFixed(2)}</p>
+                      <p className="text-lg font-semibold">${parseFloat(order.total || '0').toFixed(2)}</p>
                     </div>
                   </div>
                 </CardContent>
