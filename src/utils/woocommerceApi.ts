@@ -766,6 +766,188 @@ class WooCommerceAPI {
     }
   }
 
+  async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+    try {
+      logger.log('🔑 Requesting password reset for email:', email);
+      
+      // WordPress Lost Password endpoint
+      const wpLostPasswordUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-login.php?action=lostpassword`;
+      
+      // Try WordPress REST API approach first
+      const wpApiUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/reset-password`;
+      
+      try {
+        const response = await axios.post(wpApiUrl, {
+          user_login: email
+        }, {
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        logger.log('✅ WordPress REST API reset successful');
+        return {
+          success: true,
+          message: 'Password reset link sent to your email address.'
+        };
+      } catch (restApiError: any) {
+        logger.log('⚠️ WordPress REST API failed, trying form submission:', restApiError.response?.status);
+        
+        // Fallback to form submission approach
+        try {
+          const formData = new FormData();
+          formData.append('user_login', email);
+          formData.append('wp-submit', 'Get New Password');
+          
+          const formResponse = await axios.post(wpLostPasswordUrl, formData, {
+            timeout: 10000,
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            },
+            maxRedirects: 0,
+            validateStatus: (status) => status < 400 || status === 302
+          });
+          
+          logger.log('✅ WordPress form submission successful');
+          return {
+            success: true,
+            message: 'Password reset link sent to your email address.'
+          };
+        } catch (formError: any) {
+          logger.error('❌ WordPress form submission failed:', formError.response?.status);
+          throw formError;
+        }
+      }
+    } catch (error: any) {
+      logger.error('❌ Password reset request failed:', error);
+      
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'No account found with this email address.'
+        };
+      } else if (error.response?.status === 429) {
+        return {
+          success: false,
+          message: 'Too many password reset requests. Please try again later.'
+        };
+      }
+      
+      return {
+        success: false,
+        message: 'Failed to send password reset email. Please try again.'
+      };
+    }
+  }
+
+  async resetPassword(resetKey: string, newPassword: string, userLogin: string): Promise<{ success: boolean; message: string }> {
+    try {
+      logger.log('🔑 Resetting password for user:', userLogin);
+      
+      // WordPress password reset endpoint
+      const wpResetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/reset-password`;
+      
+      try {
+        const response = await axios.post(wpResetUrl, {
+          key: resetKey,
+          login: userLogin,
+          password: newPassword
+        }, {
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        logger.log('✅ Password reset successful');
+        return {
+          success: true,
+          message: 'Password has been reset successfully.'
+        };
+      } catch (error: any) {
+        logger.error('❌ Password reset failed:', error.response?.data || error.message);
+        
+        if (error.response?.status === 400) {
+          return {
+            success: false,
+            message: 'Invalid reset key or the link has expired.'
+          };
+        } else if (error.response?.status === 404) {
+          return {
+            success: false,
+            message: 'User not found.'
+          };
+        }
+        
+        return {
+          success: false,
+          message: 'Failed to reset password. Please try again.'
+        };
+      }
+    } catch (error: any) {
+      logger.error('❌ Password reset error:', error);
+      return {
+        success: false,
+        message: 'Failed to reset password. Please try again.'
+      };
+    }
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    try {
+      logger.log('🔑 Changing password for authenticated user');
+      
+      const token = localStorage.getItem('wc_jwt_token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      
+      // Get current user data
+      const storedUser = localStorage.getItem('wc_user');
+      if (!storedUser) {
+        throw new Error('No user data found');
+      }
+      
+      const userData = JSON.parse(storedUser);
+      const customerId = userData.customerId;
+      
+      if (!customerId) {
+        throw new Error('Customer ID not found');
+      }
+      
+      // Update customer password via WooCommerce API
+      const response = await this.api.put(`/customers/${customerId}`, {
+        password: newPassword
+      });
+      
+      logger.log('✅ Password changed successfully');
+      return {
+        success: true,
+        message: 'Password has been changed successfully.'
+      };
+    } catch (error: any) {
+      logger.error('❌ Password change failed:', error.response?.data || error.message);
+      
+      if (error.response?.status === 401) {
+        return {
+          success: false,
+          message: 'Authentication failed. Please log in again.'
+        };
+      } else if (error.response?.status === 403) {
+        return {
+          success: false,
+          message: 'You do not have permission to change the password.'
+        };
+      }
+      
+      return {
+        success: false,
+        message: 'Failed to change password. Please try again.'
+      };
+    }
+  }
+
   logout(): void {
     localStorage.removeItem('wc_jwt_token');
     localStorage.removeItem('wc_user');
