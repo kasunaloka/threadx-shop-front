@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, LogOut, Menu, X, ChevronDown } from 'lucide-react';
+import { ShoppingCart, User, LogOut, Menu, X, ChevronDown, Package } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -88,9 +88,17 @@ const Navbar = () => {
                       My Account
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <User className="mr-2 h-4 w-4" />
-                      Profile
+                    <DropdownMenuItem asChild className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+                      <Link to="/profile" className="flex items-center">
+                        <User className="mr-2 h-4 w-4" />
+                        Profile
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+                      <Link to="/orders" className="flex items-center">
+                        <Package className="mr-2 h-4 w-4" />
+                        Orders
+                      </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       onClick={handleLogout}
