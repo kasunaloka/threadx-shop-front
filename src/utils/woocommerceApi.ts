@@ -84,6 +84,7 @@ export interface WooCommerceOrder {
 class WooCommerceAPI {
   private api: AxiosInstance;
   private config: WooCommerceConfig;
+  private storeApiNonce: string | null = null;
 
   constructor(config: WooCommerceConfig) {
     this.config = config;
@@ -169,46 +170,125 @@ class WooCommerceAPI {
     }
   }
 
-  // Cart (using WooCommerce Store API)
+  // Cart (using WooCommerce Store API with improved error handling)
   async addToCart(productId: number, quantity: number = 1, variation?: Record<string, string>): Promise<any> {
     try {
+      console.log('Adding to cart:', { productId, quantity, variation });
+      
+      // Try to get nonce first
+      await this.refreshStoreApiNonce();
+      
+      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+      
       const response = await axios.post(
-        `${this.config.baseURL}/wp-json/wc/store/v1/cart/add-item`,
+        `${storeApiUrl}/cart/add-item`,
         {
           id: productId,
           quantity,
-          variation,
+          variation: variation || {},
         },
         {
           headers: {
             'Content-Type': 'application/json',
-            'X-WC-Store-API-Nonce': await this.getStoreApiNonce(),
+            ...(this.storeApiNonce && { 'X-WC-Store-API-Nonce': this.storeApiNonce }),
           },
+          withCredentials: true,
         }
       );
+      
+      console.log('Add to cart response:', response.data);
       return response.data;
     } catch (error) {
-      throw new Error('Failed to add item to cart');
+      console.error('Add to cart error:', error);
+      
+      // Fallback: try without nonce
+      try {
+        const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+        const response = await axios.post(
+          `${storeApiUrl}/cart/add-item`,
+          {
+            id: productId,
+            quantity,
+            variation: variation || {},
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            withCredentials: true,
+          }
+        );
+        return response.data;
+      } catch (fallbackError) {
+        console.error('Fallback add to cart error:', fallbackError);
+        throw new Error('Failed to add item to cart');
+      }
     }
   }
 
   async getCart(): Promise<any> {
     try {
-      const response = await axios.get(`${this.config.baseURL}/wp-json/wc/store/v1/cart`, {
+      console.log('Fetching cart...');
+      
+      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+      
+      const response = await axios.get(`${storeApiUrl}/cart`, {
         headers: {
-          'X-WC-Store-API-Nonce': await this.getStoreApiNonce(),
+          ...(this.storeApiNonce && { 'X-WC-Store-API-Nonce': this.storeApiNonce }),
         },
+        withCredentials: true,
       });
+      
+      console.log('Cart response:', response.data);
       return response.data;
     } catch (error) {
-      throw new Error('Failed to fetch cart');
+      console.error('Get cart error:', error);
+      
+      // Return empty cart structure if cart fetch fails
+      return {
+        items: [],
+        items_count: 0,
+        items_weight: 0,
+        cross_sells: [],
+        needs_payment: false,
+        needs_shipping: false,
+        has_calculated_shipping: false,
+        fees: [],
+        totals: {
+          total_items: "0",
+          total_items_tax: "0",
+          total_fees: "0",
+          total_fees_tax: "0",
+          total_discount: "0",
+          total_discount_tax: "0",
+          total_shipping: "0",
+          total_shipping_tax: "0",
+          total_price: "0",
+          total_tax: "0",
+          currency_code: "USD",
+          currency_symbol: "$",
+          currency_minor_unit: 2,
+          currency_decimal_separator: ".",
+          currency_thousand_separator: ",",
+          currency_prefix: "$",
+          currency_suffix: ""
+        },
+        shipping_address: {},
+        billing_address: {},
+        coupons: [],
+        payment_methods: [],
+        shipping_rates: [],
+        extensions: {}
+      };
     }
   }
 
   async updateCartItem(key: string, quantity: number): Promise<any> {
     try {
+      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+      
       const response = await axios.post(
-        `${this.config.baseURL}/wp-json/wc/store/v1/cart/update-item`,
+        `${storeApiUrl}/cart/update-item`,
         {
           key,
           quantity,
@@ -216,30 +296,36 @@ class WooCommerceAPI {
         {
           headers: {
             'Content-Type': 'application/json',
-            'X-WC-Store-API-Nonce': await this.getStoreApiNonce(),
+            ...(this.storeApiNonce && { 'X-WC-Store-API-Nonce': this.storeApiNonce }),
           },
+          withCredentials: true,
         }
       );
       return response.data;
     } catch (error) {
+      console.error('Update cart item error:', error);
       throw new Error('Failed to update cart item');
     }
   }
 
   async removeCartItem(key: string): Promise<any> {
     try {
+      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+      
       const response = await axios.post(
-        `${this.config.baseURL}/wp-json/wc/store/v1/cart/remove-item`,
+        `${storeApiUrl}/cart/remove-item`,
         { key },
         {
           headers: {
             'Content-Type': 'application/json',
-            'X-WC-Store-API-Nonce': await this.getStoreApiNonce(),
+            ...(this.storeApiNonce && { 'X-WC-Store-API-Nonce': this.storeApiNonce }),
           },
+          withCredentials: true,
         }
       );
       return response.data;
     } catch (error) {
+      console.error('Remove cart item error:', error);
       throw new Error('Failed to remove cart item');
     }
   }
@@ -327,14 +413,27 @@ class WooCommerceAPI {
     localStorage.removeItem('wc_jwt_token');
   }
 
-  // Helper method to get Store API nonce
-  private async getStoreApiNonce(): Promise<string> {
+  // Helper method to get Store API nonce with better error handling
+  private async refreshStoreApiNonce(): Promise<void> {
     try {
-      const response = await axios.get(`${this.config.baseURL}/wp-json/wc/store/v1/cart`);
-      return response.headers['x-wc-store-api-nonce'] || '';
+      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
+      const response = await axios.get(`${storeApiUrl}/cart`, {
+        withCredentials: true,
+      });
+      
+      this.storeApiNonce = response.headers['x-wc-store-api-nonce'] || null;
+      console.log('Store API nonce refreshed:', this.storeApiNonce ? 'success' : 'not found');
     } catch (error) {
-      return '';
+      console.log('Could not refresh store API nonce:', error.message);
+      this.storeApiNonce = null;
     }
+  }
+
+  private async getStoreApiNonce(): Promise<string> {
+    if (!this.storeApiNonce) {
+      await this.refreshStoreApiNonce();
+    }
+    return this.storeApiNonce || '';
   }
 }
 
