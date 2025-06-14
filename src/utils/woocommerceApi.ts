@@ -492,21 +492,49 @@ class WooCommerceAPI {
     try {
       logger.log('🔐 Attempting login with username:', username);
       
-      // Try multiple JWT endpoint variations
+      // First, try to find the customer to validate they exist
+      let customerData = null;
+      try {
+        // Check if input is email or username
+        const isEmail = username.includes('@');
+        const searchParam = isEmail ? { email: username } : { search: username };
+        
+        logger.log('🔍 Searching for customer with:', searchParam);
+        const customerResponse = await this.api.get('/customers', {
+          params: { ...searchParam, per_page: 1 },
+          timeout: 10000,
+        });
+        
+        if (customerResponse.data && customerResponse.data.length > 0) {
+          customerData = customerResponse.data[0];
+          logger.log('✅ Found customer:', customerData.id, customerData.email);
+        } else {
+          logger.log('❌ Customer not found');
+          throw new Error('Invalid username or email. Please check your credentials.');
+        }
+      } catch (customerError: any) {
+        logger.error('❌ Customer lookup failed:', customerError);
+        if (customerError.response?.status === 401 || customerError.response?.status === 403) {
+          throw new Error('Authentication failed. Please check your credentials.');
+        }
+        throw new Error('Unable to verify account. Please try again.');
+      }
+      
+      // Try JWT authentication endpoints
       const possibleJwtUrls = [
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
       ];
 
-      let loginResponse;
-      let jwtUrl;
+      let loginResponse = null;
+      let jwtUrl = null;
 
       for (const url of possibleJwtUrls) {
         try {
           logger.log('🌐 Trying JWT URL:', url);
           loginResponse = await axios.post(url, {
-            username,
+            username: customerData?.email || username,
             password,
           }, {
             timeout: 10000,
@@ -515,100 +543,84 @@ class WooCommerceAPI {
           logger.log('✅ JWT Login successful with URL:', url);
           break;
         } catch (error: any) {
-          logger.log('❌ JWT URL failed:', url, error.response?.status);
+          logger.log('❌ JWT URL failed:', url, error.response?.status, error.response?.data?.message);
+          
+          if (error.response?.status === 403 || error.response?.data?.message?.includes('incorrect')) {
+            throw new Error('Invalid password. Please check your credentials.');
+          }
           continue;
         }
       }
 
-      if (!loginResponse) {
-        // Fallback to basic auth if JWT is not available
-        logger.log('🔄 JWT not available, trying basic auth fallback');
+      if (!loginResponse && customerData) {
+        // JWT not available but customer exists, create simple session token
+        logger.log('🔄 JWT not available, creating simple session token');
         
-        try {
-          // Try to authenticate with WooCommerce customer endpoint
-          const customerResponse = await this.api.get('/customers', {
-            params: {
-              email: username,
-              search: username,
-            }
-          });
-
-          if (customerResponse.data && customerResponse.data.length > 0) {
-            const customer = customerResponse.data[0];
-            
-            // Create a simple token for session management
-            const simpleToken = btoa(`${username}:${Date.now()}`);
-            localStorage.setItem('wc_jwt_token', simpleToken);
-            
-            const userData = {
-              email: customer.email,
-              username: customer.username || username,
-              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : username,
-            };
-            
-            logger.log('✅ Basic auth login successful');
-            
-            return {
-              token: simpleToken,
-              user: userData,
-              customerId: customer.id
-            };
-          } else {
-            throw new Error('Customer not found');
-          }
-        } catch (basicAuthError) {
-          logger.error('❌ Basic auth fallback failed:', basicAuthError);
-          throw new Error('Invalid username or password. Please check your credentials.');
-        }
+        const simpleToken = btoa(`${customerData.email}:${Date.now()}`);
+        localStorage.setItem('wc_jwt_token', simpleToken);
+        
+        const userData = {
+          id: customerData.id,
+          email: customerData.email,
+          username: customerData.username || username,
+          displayName: customerData.first_name ? 
+            `${customerData.first_name} ${customerData.last_name}`.trim() : 
+            customerData.username || username,
+        };
+        
+        logger.log('✅ Simple auth login successful');
+        
+        return {
+          token: simpleToken,
+          user: userData,
+          customerId: customerData.id
+        };
+      } else if (!loginResponse) {
+        throw new Error('Authentication service not available. Please contact support.');
       }
 
+      // Process JWT response
       const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
       localStorage.setItem('wc_jwt_token', token);
       
-      let customerId;
-      try {
-        logger.log('🔍 Looking for customer with email:', user_email);
-        const customerResponse = await this.api.get('/customers', {
-          params: {
-            email: user_email,
-          }
-        });
-        
-        logger.log('👥 Customer search response:', customerResponse.data);
-        
-        if (customerResponse.data && customerResponse.data.length > 0) {
-          customerId = customerResponse.data[0].id;
-          logger.log('✅ Found customer ID:', customerId);
-        }
-      } catch (customerError) {
-        logger.log('⚠️ Could not fetch customer ID:', customerError);
-      }
-      
       const userData = {
-        email: user_email,
-        username: user_nicename,
-        displayName: user_display_name,
+        id: customerData?.id,
+        email: user_email || customerData?.email,
+        username: user_nicename || customerData?.username || username,
+        displayName: user_display_name || customerData?.first_name ? 
+          `${customerData.first_name} ${customerData.last_name}`.trim() : 
+          user_nicename || username,
       };
       
-      logger.log('✅ Final login data:', { userData, customerId });
+      logger.log('✅ Final login data:', { userData, customerId: customerData?.id });
       
       return {
         token,
         user: userData,
-        customerId
+        customerId: customerData?.id
       };
     } catch (error: any) {
-      logger.error('❌ Login error:', error.response?.data || error.message);
+      logger.error('❌ Login error:', error.message || error);
       
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
+      // Clear any stored tokens on login failure
+      localStorage.removeItem('wc_jwt_token');
+      localStorage.removeItem('wc_user');
+      
+      if (error.message && (
+        error.message.includes('Invalid username') ||
+        error.message.includes('Invalid password') ||
+        error.message.includes('check your credentials')
+      )) {
+        throw error;
       } else if (error.response?.status === 403) {
-        throw new Error('Invalid username or password');
+        throw new Error('Invalid username or password. Please check your credentials.');
       } else if (error.response?.status === 404) {
         throw new Error('Authentication service not available. Please contact support.');
+      } else if (error.response?.status >= 500) {
+        throw new Error('Server error. Please try again later.');
       }
       
-      throw new Error('Login failed. Please check your credentials.');
+      throw new Error('Login failed. Please check your credentials and try again.');
     }
   }
 
@@ -618,7 +630,7 @@ class WooCommerceAPI {
     password: string;
     first_name?: string;
     last_name?: string;
-  }): Promise<any> {
+  }): Promise<any> => {
     try {
       logger.log('Attempting registration with data:', userData);
       
@@ -656,7 +668,7 @@ class WooCommerceAPI {
     }
   }
 
-  async validateToken(): Promise<boolean> {
+  async validateToken(): Promise<boolean> => {
     try {
       const token = localStorage.getItem('wc_jwt_token');
       if (!token) return false;
