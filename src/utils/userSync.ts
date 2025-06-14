@@ -44,8 +44,8 @@ export const createSupabaseUserFromWordPress = async (
   try {
     logger.log('Creating Supabase user from WordPress user:', wpUser);
 
-    // Generate a temporary password for the Supabase user
-    const tempPassword = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // Generate a secure temporary password for the Supabase user
+    const tempPassword = `wp_sync_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
 
     // Create the user in Supabase
     const { data, error } = await supabase.auth.admin.createUser({
@@ -55,7 +55,8 @@ export const createSupabaseUserFromWordPress = async (
         username: wpUser.username,
         display_name: wpUser.displayName,
         wc_customer_id: wpUser.customerId,
-        created_from_wordpress: true
+        created_from_wordpress: true,
+        sync_source: 'wordpress'
       },
       email_confirm: true // Auto-confirm since they're already verified in WordPress
     });
@@ -67,6 +68,10 @@ export const createSupabaseUserFromWordPress = async (
 
     if (data.user) {
       logger.log('Supabase user created successfully:', data.user.id);
+      
+      // Immediately sync the profile data
+      await syncWordPressUserToSupabase(wpUser, data.user.id);
+      
       return data.user.id;
     }
 
@@ -82,13 +87,17 @@ export const linkWordPressToSupabaseUser = async (
   supabaseUserId: string
 ): Promise<boolean> => {
   try {
+    logger.log('Linking WordPress user to existing Supabase user:', { wpUser, supabaseUserId });
+
     // Update the user's metadata to include WordPress information
     const { error } = await supabase.auth.admin.updateUserById(supabaseUserId, {
       user_metadata: {
         username: wpUser.username,
         display_name: wpUser.displayName,
         wc_customer_id: wpUser.customerId,
-        linked_to_wordpress: true
+        linked_to_wordpress: true,
+        wordpress_user_id: wpUser.id,
+        sync_source: 'dual'
       }
     });
 
@@ -98,9 +107,61 @@ export const linkWordPressToSupabaseUser = async (
     }
 
     // Sync the profile data
-    return await syncWordPressUserToSupabase(wpUser, supabaseUserId);
+    const syncSuccess = await syncWordPressUserToSupabase(wpUser, supabaseUserId);
+    
+    if (syncSuccess) {
+      logger.log('WordPress user successfully linked to Supabase user');
+    }
+    
+    return syncSuccess;
   } catch (error) {
     logger.error('Error linking WordPress to Supabase user:', error);
+    return false;
+  }
+};
+
+export const getSupabaseUserByEmail = async (email: string): Promise<string | null> => {
+  try {
+    // This would require admin privileges, so we'll rely on sign-in attempts instead
+    logger.log('Checking for existing Supabase user with email:', email);
+    return null;
+  } catch (error) {
+    logger.error('Error checking for existing Supabase user:', error);
+    return null;
+  }
+};
+
+export const validateUserSync = async (
+  wpUser: WordPressUser,
+  supabaseUserId: string
+): Promise<boolean> => {
+  try {
+    // Verify that the sync is working by checking the profile data
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', supabaseUserId)
+      .single();
+
+    if (error) {
+      logger.error('Error validating user sync:', error);
+      return false;
+    }
+
+    if (profile) {
+      const isValid = (
+        profile.email === wpUser.email &&
+        profile.username === wpUser.username &&
+        profile.wc_customer_id === wpUser.customerId
+      );
+      
+      logger.log('User sync validation result:', { isValid, profile, wpUser });
+      return isValid;
+    }
+
+    return false;
+  } catch (error) {
+    logger.error('Error validating user sync:', error);
     return false;
   }
 };

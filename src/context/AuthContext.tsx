@@ -1,10 +1,9 @@
-
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
 import { logger } from '../utils/logger';
 import { useSupabaseAuthContext } from './SupabaseAuthContext';
-import { syncWordPressUserToSupabase, linkWordPressToSupabaseUser } from '../utils/userSync';
+import { syncWordPressUserToSupabase, linkWordPressToSupabaseUser, createSupabaseUserFromWordPress } from '../utils/userSync';
 
 interface User {
   id?: number;
@@ -19,15 +18,18 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  authMethod: 'wordpress' | 'supabase' | null;
+  authMethod: 'wordpress' | 'supabase' | 'dual' | null;
+  syncStatus: 'synced' | 'syncing' | 'failed' | 'none';
 }
 
 type AuthAction =
   | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: { user: User; method: 'wordpress' | 'supabase' } }
+  | { type: 'LOGIN_SUCCESS'; payload: { user: User; method: 'wordpress' | 'supabase' | 'dual' } }
   | { type: 'LOGIN_FAILURE' }
   | { type: 'LOGOUT' }
-  | { type: 'SET_LOADING'; payload: boolean };
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_SYNC_STATUS'; payload: 'synced' | 'syncing' | 'failed' | 'none' }
+  | { type: 'UPDATE_USER'; payload: User };
 
 interface AuthContextType extends AuthState {
   login: (username: string, password: string) => Promise<boolean>;
@@ -40,6 +42,9 @@ interface AuthContextType extends AuthState {
   }) => Promise<boolean>;
   logout: () => void;
   resetPassword: (email: string) => Promise<boolean>;
+  syncUserData: () => Promise<boolean>;
+  switchToSupabase: () => Promise<boolean>;
+  switchToWordPress: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -58,6 +63,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         isAuthenticated: true,
         isLoading: false,
         authMethod: action.payload.method,
+        syncStatus: action.payload.method === 'dual' ? 'synced' : 'none',
       };
     case 'LOGIN_FAILURE':
       return {
@@ -66,6 +72,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         isAuthenticated: false,
         isLoading: false,
         authMethod: null,
+        syncStatus: 'none',
       };
     case 'LOGOUT':
       return {
@@ -74,11 +81,22 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         isAuthenticated: false,
         isLoading: false,
         authMethod: null,
+        syncStatus: 'none',
       };
     case 'SET_LOADING':
       return {
         ...state,
         isLoading: action.payload,
+      };
+    case 'SET_SYNC_STATUS':
+      return {
+        ...state,
+        syncStatus: action.payload,
+      };
+    case 'UPDATE_USER':
+      return {
+        ...state,
+        user: action.payload,
       };
     default:
       return state;
@@ -91,35 +109,59 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: false,
     isLoading: true,
     authMethod: null,
+    syncStatus: 'none',
   });
 
   const supabaseAuth = useSupabaseAuthContext();
 
-  // Check for existing authentication on mount
+  // Enhanced authentication check with better synchronization
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // First check WordPress/WooCommerce auth
+        dispatch({ type: 'SET_LOADING', payload: true });
+
+        // Check WordPress authentication first (primary system)
         const isWpValid = await wooCommerceApi.validateToken();
-        if (isWpValid) {
-          const storedUser = localStorage.getItem('wc_user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            logger.log('AuthContext: Restored WordPress user from storage:', userData);
+        const storedUser = localStorage.getItem('wc_user');
+        
+        if (isWpValid && storedUser) {
+          const wpUserData = JSON.parse(storedUser);
+          logger.log('AuthContext: WordPress user found:', wpUserData);
+          
+          // Check if Supabase user exists and sync
+          if (supabaseAuth.user) {
+            logger.log('AuthContext: Both WordPress and Supabase users found, syncing...');
+            dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
             
-            // If we have a Supabase user, sync the data
-            if (supabaseAuth.user) {
-              await syncWordPressUserToSupabase(userData, supabaseAuth.user.id);
-              userData.supabaseId = supabaseAuth.user.id;
-            }
+            const syncSuccess = await syncWordPressUserToSupabase(wpUserData, supabaseAuth.user.id);
             
-            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, method: 'wordpress' } });
+            const userData = {
+              ...wpUserData,
+              supabaseId: supabaseAuth.user.id,
+            };
+            
+            dispatch({ 
+              type: 'LOGIN_SUCCESS', 
+              payload: { 
+                user: userData, 
+                method: 'dual' 
+              } 
+            });
+            dispatch({ type: 'SET_SYNC_STATUS', payload: syncSuccess ? 'synced' : 'failed' });
+            
+            // Update stored user data with Supabase ID
+            localStorage.setItem('wc_user', JSON.stringify(userData));
+            return;
+          } else {
+            // WordPress only
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'wordpress' } });
             return;
           }
         }
 
-        // If WordPress auth fails and Supabase user exists, use Supabase
+        // If no WordPress auth, check Supabase
         if (supabaseAuth.user && !supabaseAuth.isLoading) {
+          logger.log('AuthContext: Supabase-only user found');
           const supabaseUser = {
             id: undefined,
             email: supabaseAuth.user.email || '',
@@ -127,7 +169,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             displayName: supabaseAuth.user.user_metadata?.display_name || supabaseAuth.user.user_metadata?.username || supabaseAuth.user.email?.split('@')[0] || '',
             supabaseId: supabaseAuth.user.id,
           };
-          logger.log('AuthContext: Using Supabase user:', supabaseUser);
+          
           dispatch({ type: 'LOGIN_SUCCESS', payload: { user: supabaseUser, method: 'supabase' } });
           return;
         }
@@ -139,7 +181,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
 
-    // Only check auth when Supabase auth has finished loading
     if (!supabaseAuth.isLoading) {
       checkAuth();
     }
@@ -149,14 +190,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'LOGIN_START' });
     
     try {
-      logger.log('AuthContext: Starting login process for:', username);
+      logger.log('AuthContext: Starting dual authentication login for:', username);
       
-      // Try WordPress login first
+      // Always try WordPress first (primary system for e-commerce)
       try {
         const { user, customerId } = await wooCommerceApi.login(username, password);
         logger.log('AuthContext: WordPress login successful');
         
-        const userData: User = {
+        const wpUserData: User = {
           id: user.id,
           email: user.email || username,
           username: user.username || username,
@@ -165,32 +206,55 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabaseId: undefined
         };
         
-        // If we have a Supabase user, sync the WordPress data
-        if (supabaseAuth.user) {
-          await syncWordPressUserToSupabase(userData, supabaseAuth.user.id);
-          userData.supabaseId = supabaseAuth.user.id;
-        } else {
-          // Try to link to existing Supabase user or create one
+        // Try to sync with or create Supabase user
+        dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
+        
+        try {
+          // First, try to sign in to existing Supabase account
+          const { data: signInData } = await supabaseAuth.signIn(wpUserData.email, password);
+          
+          if (signInData.user) {
+            // Existing Supabase user found, sync data
+            await linkWordPressToSupabaseUser(wpUserData, signInData.user.id);
+            wpUserData.supabaseId = signInData.user.id;
+            
+            dispatch({ type: 'SET_SYNC_STATUS', payload: 'synced' });
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'dual' } });
+          } else {
+            // No existing Supabase user, WordPress only
+            dispatch({ type: 'SET_SYNC_STATUS', payload: 'none' });
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'wordpress' } });
+          }
+        } catch (supabaseError) {
+          logger.log('No existing Supabase user, trying to create one:', supabaseError);
+          
+          // Try to create new Supabase user
           try {
-            const { data } = await supabaseAuth.signIn(userData.email, password);
-            if (data.user) {
-              await linkWordPressToSupabaseUser(userData, data.user.id);
-              userData.supabaseId = data.user.id;
+            const supabaseUserId = await createSupabaseUserFromWordPress(wpUserData);
+            if (supabaseUserId) {
+              wpUserData.supabaseId = supabaseUserId;
+              dispatch({ type: 'SET_SYNC_STATUS', payload: 'synced' });
+              dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'dual' } });
+            } else {
+              // WordPress only
+              dispatch({ type: 'SET_SYNC_STATUS', payload: 'failed' });
+              dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'wordpress' } });
             }
-          } catch (supabaseError) {
-            logger.log('Could not link to Supabase user:', supabaseError);
-            // This is optional, so we continue without Supabase sync
+          } catch (createError) {
+            logger.log('Could not create Supabase user, WordPress only:', createError);
+            dispatch({ type: 'SET_SYNC_STATUS', payload: 'failed' });
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: wpUserData, method: 'wordpress' } });
           }
         }
         
-        localStorage.setItem('wc_user', JSON.stringify(userData));
-        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, method: 'wordpress' } });
+        localStorage.setItem('wc_user', JSON.stringify(wpUserData));
         toast.success('Login successful!');
         return true;
-      } catch (wpError) {
-        logger.log('WordPress login failed, trying Supabase:', wpError);
         
-        // If WordPress fails, try Supabase
+      } catch (wpError) {
+        logger.log('WordPress login failed, trying Supabase only:', wpError);
+        
+        // Fallback to Supabase-only authentication
         const { data, error } = await supabaseAuth.signIn(username, password);
         
         if (error) {
@@ -233,9 +297,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
-      logger.log('Starting registration process...');
+      logger.log('Starting dual registration process...');
       
-      // Try WordPress registration first
+      // Register in WordPress first (primary for e-commerce)
       try {
         await wooCommerceApi.register({
           username: userData.username,
@@ -245,26 +309,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           last_name: userData.lastName,
         });
         
+        logger.log('WordPress registration successful');
+        
         // Also register in Supabase for enhanced features
         try {
-          await supabaseAuth.signUp(userData.email, userData.password, {
+          const { data: supabaseData } = await supabaseAuth.signUp(userData.email, userData.password, {
             username: userData.username,
             firstName: userData.firstName,
             lastName: userData.lastName,
           });
+          
+          if (supabaseData.user) {
+            logger.log('Dual registration successful');
+            toast.success('Registration successful! You can now log in with both systems.');
+          } else {
+            logger.log('WordPress registration successful, Supabase registration failed');
+            toast.success('Registration successful! You can now log in.');
+          }
         } catch (supabaseError) {
           logger.log('Supabase registration failed, but WordPress succeeded:', supabaseError);
-          // This is optional, so we continue
+          toast.success('Registration successful! You can now log in.');
         }
         
         dispatch({ type: 'SET_LOADING', payload: false });
-        toast.success('Registration successful! You can now log in.');
         return true;
-      } catch (wpError) {
-        logger.log('WordPress registration failed, trying Supabase:', wpError);
         
-        // If WordPress fails, register with Supabase
-        const { data, error } = await supabaseAuth.signUp(userData.email, userData.password, {
+      } catch (wpError) {
+        logger.log('WordPress registration failed, trying Supabase only:', wpError);
+        
+        // Fallback to Supabase-only registration
+        const { error } = await supabaseAuth.signUp(userData.email, userData.password, {
           username: userData.username,
           firstName: userData.firstName,
           lastName: userData.lastName,
@@ -288,16 +362,95 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const resetPassword = async (email: string): Promise<boolean> => {
+  const syncUserData = async (): Promise<boolean> => {
+    if (!state.user || !state.user.supabaseId) {
+      toast.error('No user data to sync');
+      return false;
+    }
+
+    dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
+    
     try {
-      const { error } = await supabaseAuth.resetPassword(email);
+      const success = await syncWordPressUserToSupabase(state.user, state.user.supabaseId);
+      dispatch({ type: 'SET_SYNC_STATUS', payload: success ? 'synced' : 'failed' });
       
-      if (error) {
-        throw error;
+      if (success) {
+        toast.success('User data synchronized successfully!');
+      } else {
+        toast.error('Failed to synchronize user data');
       }
       
-      toast.success('Password reset email sent! Please check your inbox.');
+      return success;
+    } catch (error) {
+      logger.error('Sync failed:', error);
+      dispatch({ type: 'SET_SYNC_STATUS', payload: 'failed' });
+      toast.error('Failed to synchronize user data');
+      return false;
+    }
+  };
+
+  const switchToSupabase = async (): Promise<boolean> => {
+    if (!state.user) return false;
+
+    try {
+      if (!state.user.supabaseId) {
+        // Create Supabase user if doesn't exist
+        const supabaseUserId = await createSupabaseUserFromWordPress(state.user);
+        if (supabaseUserId) {
+          const updatedUser = { ...state.user, supabaseId: supabaseUserId };
+          dispatch({ type: 'UPDATE_USER', payload: updatedUser });
+          localStorage.setItem('wc_user', JSON.stringify(updatedUser));
+        }
+      }
+      
+      toast.success('Switched to Supabase features');
       return true;
+    } catch (error) {
+      logger.error('Failed to switch to Supabase:', error);
+      toast.error('Failed to enable Supabase features');
+      return false;
+    }
+  };
+
+  const switchToWordPress = async (): Promise<boolean> => {
+    if (!state.user) return false;
+    
+    // WordPress is always primary, so this just confirms WordPress connection
+    try {
+      const isValid = await wooCommerceApi.validateToken();
+      if (isValid) {
+        toast.success('WordPress connection confirmed');
+        return true;
+      } else {
+        toast.error('WordPress connection lost, please log in again');
+        return false;
+      }
+    } catch (error) {
+      logger.error('WordPress validation failed:', error);
+      toast.error('WordPress connection failed');
+      return false;
+    }
+  };
+
+  const resetPassword = async (email: string): Promise<boolean> => {
+    try {
+      // Try WordPress first, then Supabase
+      try {
+        await wooCommerceApi.requestPasswordReset(email);
+        toast.success('Password reset email sent via WordPress!');
+        return true;
+      } catch (wpError) {
+        logger.log('WordPress reset failed, trying Supabase:', wpError);
+        
+        const { error } = await supabaseAuth.resetPassword(email);
+        
+        if (error) {
+          throw error;
+        }
+        
+        toast.success('Password reset email sent via Supabase!');
+        return true;
+      }
     } catch (error: any) {
       logger.error('Password reset failed:', error);
       toast.error(error.message || 'Failed to send password reset email.');
@@ -306,11 +459,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = () => {
-    // Logout from WordPress
+    // Logout from both systems
     wooCommerceApi.logout();
     localStorage.removeItem('wc_user');
     
-    // Logout from Supabase (don't await to avoid blocking)
     supabaseAuth.signOut();
     
     dispatch({ type: 'LOGOUT' });
@@ -325,6 +477,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         register,
         logout,
         resetPassword,
+        syncUserData,
+        switchToSupabase,
+        switchToWordPress,
       }}
     >
       {children}
