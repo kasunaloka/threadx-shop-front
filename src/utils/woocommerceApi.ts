@@ -1,4 +1,3 @@
-
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 // WooCommerce API configuration
@@ -337,11 +336,11 @@ class WooCommerceAPI {
   }
 }
 
-// Configuration - In a real app, these should come from environment variables
+// Configuration - Using import.meta.env for Vite instead of process.env
 const wooCommerceConfig: WooCommerceConfig = {
-  baseURL: process.env.REACT_APP_WC_BASE_URL || 'https://your-wordpress-site.com',
-  consumerKey: process.env.REACT_APP_WC_CONSUMER_KEY || 'your_consumer_key',
-  consumerSecret: process.env.REACT_APP_WC_CONSUMER_SECRET || 'your_consumer_secret',
+  baseURL: import.meta.env.VITE_WC_BASE_URL || 'https://your-wordpress-site.com',
+  consumerKey: import.meta.env.VITE_WC_CONSUMER_KEY || 'your_consumer_key',
+  consumerSecret: import.meta.env.VITE_WC_CONSUMER_SECRET || 'your_consumer_secret',
 };
 
 // Export singleton instance
