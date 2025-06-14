@@ -1,4 +1,3 @@
-
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 // WooCommerce API configuration
@@ -443,6 +442,22 @@ class WooCommerceAPI {
   }
 
   // Orders
+  async getOrders(params?: {
+    customer?: number;
+    status?: string;
+    page?: number;
+    per_page?: number;
+  }): Promise<WooCommerceOrder[]> {
+    try {
+      console.log('Fetching orders with params:', params);
+      const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      throw new Error('Failed to fetch orders');
+    }
+  }
+
   async createOrder(orderData: WooCommerceOrder): Promise<WooCommerceOrder> {
     try {
       const response: AxiosResponse<WooCommerceOrder> = await this.api.post('/orders', orderData);

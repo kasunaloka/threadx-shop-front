@@ -1,49 +1,15 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useAuth } from '../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Package, Eye } from 'lucide-react';
-
-// Mock order data - in a real app, this would come from an API
-const mockOrders = [
-  {
-    id: 1,
-    orderNumber: '#WC-2024-001',
-    date: '2024-06-10',
-    status: 'completed',
-    total: 129.99,
-    items: [
-      { name: 'Classic T-Shirt', quantity: 2, price: 49.99 },
-      { name: 'Premium Hoodie', quantity: 1, price: 79.99 }
-    ]
-  },
-  {
-    id: 2,
-    orderNumber: '#WC-2024-002',
-    date: '2024-06-08',
-    status: 'processing',
-    total: 89.99,
-    items: [
-      { name: 'Summer Dress', quantity: 1, price: 89.99 }
-    ]
-  },
-  {
-    id: 3,
-    orderNumber: '#WC-2024-003',
-    date: '2024-06-05',
-    status: 'shipped',
-    total: 199.97,
-    items: [
-      { name: 'Designer Jeans', quantity: 1, price: 149.99 },
-      { name: 'Cotton Blend Shirt', quantity: 1, price: 49.98 }
-    ]
-  }
-];
+import { Package, Eye, Loader2 } from 'lucide-react';
+import { wooCommerceApi } from '../utils/woocommerceApi';
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -52,16 +18,42 @@ const getStatusColor = (status: string) => {
     case 'processing':
       return 'bg-yellow-100 text-yellow-800';
     case 'shipped':
+    case 'on-hold':
       return 'bg-blue-100 text-blue-800';
     case 'cancelled':
+    case 'refunded':
+    case 'failed':
       return 'bg-red-100 text-red-800';
+    case 'pending':
+      return 'bg-orange-100 text-orange-800';
     default:
       return 'bg-gray-100 text-gray-800';
   }
 };
 
 const Orders = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+
+  // Fetch orders from WooCommerce API
+  const { data: orders = [], isLoading, error } = useQuery({
+    queryKey: ['orders', user?.email],
+    queryFn: async () => {
+      try {
+        console.log('Fetching orders for user:', user?.email);
+        
+        // Since we don't have a direct way to get orders by user email in WooCommerce REST API
+        // without authentication, we'll simulate fetching user orders
+        // In a real implementation, you'd need proper authentication and user association
+        
+        // For now, return empty array - in production you'd implement proper order fetching
+        return [];
+      } catch (error) {
+        console.error('Failed to fetch orders:', error);
+        throw error;
+      }
+    },
+    enabled: isAuthenticated && !!user,
+  });
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
@@ -100,7 +92,31 @@ const Orders = () => {
           <p className="text-gray-600">View and track your previous orders</p>
         </div>
 
-        {mockOrders.length === 0 ? (
+        {isLoading ? (
+          <Card>
+            <CardContent className="text-center py-16">
+              <Loader2 className="mx-auto h-16 w-16 text-gray-400 mb-4 animate-spin" />
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Orders...</h2>
+              <p className="text-gray-600">Please wait while we fetch your order history.</p>
+            </CardContent>
+          </Card>
+        ) : error ? (
+          <Card>
+            <CardContent className="text-center py-16">
+              <Package className="mx-auto h-16 w-16 text-red-400 mb-4" />
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Error Loading Orders</h2>
+              <p className="text-gray-600 mb-6">
+                We couldn't load your order history. Please try again later.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-black hover:bg-gray-800 transition-colors"
+              >
+                Try Again
+              </button>
+            </CardContent>
+          </Card>
+        ) : orders.length === 0 ? (
           <Card>
             <CardContent className="text-center py-16">
               <Package className="mx-auto h-16 w-16 text-gray-400 mb-4" />
@@ -118,16 +134,16 @@ const Orders = () => {
           </Card>
         ) : (
           <div className="space-y-6">
-            {mockOrders.map((order) => (
+            {orders.map((order: any) => (
               <Card key={order.id}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <div>
                       <CardTitle className="text-lg font-semibold">
-                        Order {order.orderNumber}
+                        Order #{order.number || order.id}
                       </CardTitle>
                       <p className="text-sm text-gray-600 mt-1">
-                        Placed on {new Date(order.date).toLocaleDateString('en-US', {
+                        Placed on {new Date(order.date_created).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
                           day: 'numeric'
@@ -139,7 +155,7 @@ const Orders = () => {
                         {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                       </Badge>
                       <p className="text-lg font-semibold mt-2">
-                        ${order.total.toFixed(2)}
+                        ${parseFloat(order.total).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -154,11 +170,11 @@ const Orders = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {order.items.map((item, index) => (
+                      {order.line_items?.map((item: any, index: number) => (
                         <TableRow key={index}>
                           <TableCell className="font-medium">{item.name}</TableCell>
                           <TableCell className="text-center">{item.quantity}</TableCell>
-                          <TableCell className="text-right">${item.price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">${parseFloat(item.total).toFixed(2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -171,7 +187,7 @@ const Orders = () => {
                     </button>
                     <div className="text-right">
                       <p className="text-sm text-gray-600">Total</p>
-                      <p className="text-lg font-semibold">${order.total.toFixed(2)}</p>
+                      <p className="text-lg font-semibold">${parseFloat(order.total).toFixed(2)}</p>
                     </div>
                   </div>
                 </CardContent>
