@@ -548,45 +548,29 @@ class WooCommerceAPI {
         throw new Error('Username and password are required');
       }
 
-      // Try JWT authentication first
-      const possibleJwtUrls = [
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
-      ];
-
-      let loginResponse;
-      let jwtUrl;
-
-      for (const url of possibleJwtUrls) {
-        try {
-          logger.log('🌐 Trying JWT URL:', url);
-          loginResponse = await axios.post(url, {
-            username,
-            password,
-          }, {
-            timeout: 10000,
-          });
-          jwtUrl = url;
-          logger.log('✅ JWT Login successful with URL:', url);
-          break;
-        } catch (error: any) {
-          logger.log('❌ JWT URL failed:', url, error.response?.status);
-          continue;
+      // Only use JWT authentication - no fallbacks that could bypass password validation
+      const jwtUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`;
+      
+      logger.log('🌐 Attempting JWT authentication:', jwtUrl);
+      
+      const loginResponse = await axios.post(jwtUrl, {
+        username,
+        password,
+      }, {
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
         }
-      }
+      });
 
-      if (!loginResponse) {
-        // If JWT is not available, we should NOT fall back to insecure authentication
-        // This was the security vulnerability - the fallback didn't validate passwords
-        logger.log('❌ JWT authentication not available and no secure fallback configured');
-        throw new Error('Authentication service is not properly configured. Please contact support.');
+      if (!loginResponse || !loginResponse.data) {
+        throw new Error('Authentication failed - no response from server');
       }
 
       const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
       
       if (!token) {
-        throw new Error('Authentication failed - no token received');
+        throw new Error('Authentication failed - invalid credentials');
       }
       
       localStorage.setItem('wc_jwt_token', token);
@@ -616,7 +600,7 @@ class WooCommerceAPI {
         displayName: user_display_name,
       };
       
-      logger.log('✅ Final login data:', { userData, customerId });
+      logger.log('✅ Login successful:', { userData, customerId });
       
       return {
         token,
@@ -626,15 +610,19 @@ class WooCommerceAPI {
     } catch (error: any) {
       logger.error('❌ Login error:', error.response?.data || error.message);
       
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.response?.status === 403) {
+      // Clear any potentially invalid tokens
+      localStorage.removeItem('wc_jwt_token');
+      localStorage.removeItem('wc_user');
+      
+      if (error.response?.status === 403 || error.response?.status === 401) {
         throw new Error('Invalid username or password');
       } else if (error.response?.status === 404) {
         throw new Error('Authentication service not available. Please contact support.');
+      } else if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
       }
       
-      throw new Error('Login failed. Please check your credentials.');
+      throw new Error('Login failed. Please check your credentials and try again.');
     }
   }
 
