@@ -1,996 +1,177 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios from 'axios';
 import { logger } from './logger';
 
-// WooCommerce API configuration
-interface WooCommerceConfig {
-  baseURL: string;
-  consumerKey: string;
-  consumerSecret: string;
-  jwtURL?: string;
-}
+const WC_CONSUMER_KEY = process.env.NEXT_PUBLIC_WC_CONSUMER_KEY;
+const WC_CONSUMER_SECRET = process.env.NEXT_PUBLIC_WC_CONSUMER_SECRET;
+const WC_BASE_URL = process.env.NEXT_PUBLIC_WC_BASE_URL;
 
-// Product interfaces based on WooCommerce API
-export interface WooCommerceProduct {
+interface WooCommerceUser {
   id: number;
-  name: string;
-  slug: string;
-  permalink: string;
-  description: string;
-  short_description: string;
-  price: string;
-  regular_price: string;
-  sale_price: string;
-  images: Array<{
-    id: number;
-    src: string;
-    alt: string;
-  }>;
-  categories: Array<{
-    id: number;
-    name: string;
-    slug: string;
-  }>;
-  attributes: Array<{
-    id: number;
-    name: string;
-    options: string[];
-  }>;
-  variations: number[];
-  stock_status: string;
-  stock_quantity: number;
-  in_stock: boolean;
+  email: string;
+  username: string;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
 }
 
-export interface WooCommerceCartItem {
-  key: string;
-  id: number;
-  quantity: number;
-  name: string;
-  price: number;
-  line_total: string;
-  variation?: Record<string, string>;
-}
+export const wooCommerceApi = {
+  login: async (username: string, password: string): Promise<{ user: WooCommerceUser; customerId?: number }> => {
+    try {
+      logger.log('Attempting to login to WordPress with username:', username);
 
-export interface WooCommerceOrder {
-  id?: number;
-  number?: string;
-  status?: string;
-  date_created?: string;
-  total?: string;
-  customer_id?: number;
-  line_items?: Array<{
-    id?: number;
-    name: string;
-    quantity: number;
-    total: string;
-    product_id: number;
-    variation_id?: number;
-  }>;
-  billing: {
-    first_name: string;
-    last_name: string;
-    email: string;
-    phone: string;
-    address_1: string;
-    city: string;
-    state: string;
-    postcode: string;
-    country: string;
-  };
-  shipping: {
-    first_name: string;
-    last_name: string;
-    address_1: string;
-    city: string;
-    state: string;
-    postcode: string;
-    country: string;
-  };
-  payment_method: string;
-  payment_method_title: string;
-}
+      const auth = 'Basic ' + Buffer.from(WC_CONSUMER_KEY + ':' + WC_CONSUMER_SECRET).toString('base64');
 
-class WooCommerceAPI {
-  private api: AxiosInstance;
-  private config: WooCommerceConfig;
-  private storeApiNonce: string | null = null;
-
-  constructor(config: WooCommerceConfig) {
-    this.config = config;
-    this.api = axios.create({
-      baseURL: config.baseURL,
-      auth: {
-        username: config.consumerKey,
-        password: config.consumerSecret,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    // Add request interceptor for JWT token
-    this.api.interceptors.request.use(
-      (config) => {
-        const token = localStorage.getItem('wc_jwt_token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-          logger.log('Added JWT token to request');
+      const response = await axios.get(`${WC_BASE_URL}/wp-json/wc/v3/customers?email=${username}`, {
+        headers: {
+          'Authorization': auth
         }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
-
-    // Add response interceptor for error handling
-    this.api.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          // Clear invalid token
-          localStorage.removeItem('wc_jwt_token');
-          localStorage.removeItem('wc_user');
-          logger.error('Authentication failed, clearing tokens');
-        }
-        logger.error('WooCommerce API Error:', error.response?.data || error.message);
-        return Promise.reject(error);
-      }
-    );
-  }
-
-  // Products
-  async getProducts(params?: {
-    page?: number;
-    per_page?: number;
-    category?: string;
-    search?: string;
-    orderby?: string;
-    order?: string;
-    min_price?: number;
-    max_price?: number;
-  }): Promise<WooCommerceProduct[]> {
-    try {
-      const response: AxiosResponse<WooCommerceProduct[]> = await this.api.get('/products', { params });
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to fetch products:', error);
-      throw new Error('Failed to fetch products');
-    }
-  }
-
-  async getProduct(id: number): Promise<WooCommerceProduct> {
-    try {
-      const response: AxiosResponse<WooCommerceProduct> = await this.api.get(`/products/${id}`);
-      return response.data;
-    } catch (error) {
-      logger.error('Failed to fetch product:', error);
-      throw new Error('Failed to fetch product');
-    }
-  }
-
-  async getProductVariations(productId: number): Promise<any[]> {
-    try {
-      const response = await this.api.get(`/products/${productId}/variations`);
-      return response.data;
-    } catch (error) {
-      throw new Error('Failed to fetch product variations');
-    }
-  }
-
-  // Categories
-  async getCategories(): Promise<any[]> {
-    try {
-      const response = await this.api.get('/products/categories');
-      return response.data;
-    } catch (error) {
-      throw new Error('Failed to fetch categories');
-    }
-  }
-
-  // Cart (using WooCommerce Store API with improved error handling)
-  async addToCart(productId: number, quantity: number = 1, variation?: Record<string, string>): Promise<any> {
-    try {
-      logger.log('Adding to cart:', { productId, quantity, variation });
-      
-      const cartData = {
-        id: productId,
-        quantity: quantity,
-        variation: variation || {},
-        added_at: new Date().toISOString()
-      };
-
-      const existingCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
-      const existingItemIndex = existingCart.findIndex((item: any) => 
-        item.id === productId && 
-        JSON.stringify(item.variation) === JSON.stringify(variation || {})
-      );
-
-      if (existingItemIndex >= 0) {
-        existingCart[existingItemIndex].quantity += quantity;
-      } else {
-        existingCart.push(cartData);
-      }
-
-      localStorage.setItem('wc_cart', JSON.stringify(existingCart));
-      
-      logger.log('Added to local cart successfully');
-      return { success: true, cart: existingCart };
-      
-    } catch (error) {
-      logger.error('Add to cart error:', error);
-      throw new Error('Unable to add item to cart. Please try again.');
-    }
-  }
-
-  async getCart(): Promise<any> {
-    try {
-      logger.log('Fetching cart...');
-      
-      const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
-      
-      if (localCart.length > 0) {
-        const cartItems = localCart.map((item: any, index: number) => ({
-          key: `local_${item.id}_${index}`,
-          id: item.id,
-          quantity: item.quantity,
-          name: `Product ${item.id}`, // Will be populated by the frontend
-          prices: {
-            price: 0, // Will be populated by the frontend
-          },
-          variation: item.variation || {},
-          images: [],
-        }));
-
-        return {
-          items: cartItems,
-          items_count: localCart.reduce((sum: number, item: any) => sum + item.quantity, 0),
-          items_weight: 0,
-          cross_sells: [],
-          needs_payment: true,
-          needs_shipping: true,
-          has_calculated_shipping: false,
-          fees: [],
-          totals: {
-            total_items: "0",
-            total_items_tax: "0",
-            total_fees: "0",
-            total_fees_tax: "0",
-            total_discount: "0",
-            total_discount_tax: "0",
-            total_shipping: "0",
-            total_shipping_tax: "0",
-            total_price: "0",
-            total_tax: "0",
-            currency_code: "USD",
-            currency_symbol: "$",
-            currency_minor_unit: 2,
-            currency_decimal_separator: ".",
-            currency_thousand_separator: ",",
-            currency_prefix: "$",
-            currency_suffix: ""
-          },
-          shipping_address: {},
-          billing_address: {},
-          coupons: [],
-          payment_methods: [],
-          shipping_rates: [],
-          extensions: {}
-        };
-      }
-
-      return {
-        items: [],
-        items_count: 0,
-        items_weight: 0,
-        cross_sells: [],
-        needs_payment: false,
-        needs_shipping: false,
-        has_calculated_shipping: false,
-        fees: [],
-        totals: {
-          total_items: "0",
-          total_items_tax: "0",
-          total_fees: "0",
-          total_fees_tax: "0",
-          total_discount: "0",
-          total_discount_tax: "0",
-          total_shipping: "0",
-          total_shipping_tax: "0",
-          total_price: "0",
-          total_tax: "0",
-          currency_code: "USD",
-          currency_symbol: "$",
-          currency_minor_unit: 2,
-          currency_decimal_separator: ".",
-          currency_thousand_separator: ",",
-          currency_prefix: "$",
-          currency_suffix: ""
-        },
-        shipping_address: {},
-        billing_address: {},
-        coupons: [],
-        payment_methods: [],
-        shipping_rates: [],
-        extensions: {}
-      };
-    } catch (error) {
-      logger.error('Get cart error:', error);
-      
-      return {
-        items: [],
-        items_count: 0,
-        items_weight: 0,
-        cross_sells: [],
-        needs_payment: false,
-        needs_shipping: false,
-        has_calculated_shipping: false,
-        fees: [],
-        totals: {
-          total_items: "0",
-          total_items_tax: "0",
-          total_fees: "0",
-          total_fees_tax: "0",
-          total_discount: "0",
-          total_discount_tax: "0",
-          total_shipping: "0",
-          total_shipping_tax: "0",
-          total_price: "0",
-          total_tax: "0",
-          currency_code: "USD",
-          currency_symbol: "$",
-          currency_minor_unit: 2,
-          currency_decimal_separator: ".",
-          currency_thousand_separator: ",",
-          currency_prefix: "$",
-          currency_suffix: ""
-        },
-        shipping_address: {},
-        billing_address: {},
-        coupons: [],
-        payment_methods: [],
-        shipping_rates: [],
-        extensions: {}
-      };
-    }
-  }
-
-  async updateCartItem(key: string, quantity: number): Promise<any> {
-    try {
-      logger.log('Updating cart item:', { key, quantity });
-      
-      if (key.startsWith('local_')) {
-        const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
-        const itemIndex = parseInt(key.split('_')[2]);
-        
-        if (itemIndex >= 0 && itemIndex < localCart.length) {
-          localCart[itemIndex].quantity = quantity;
-          localStorage.setItem('wc_cart', JSON.stringify(localCart));
-          return { success: true };
-        }
-      }
-      
-      return { success: true };
-    } catch (error) {
-      logger.error('Update cart item error:', error);
-      throw new Error('Failed to update cart item');
-    }
-  }
-
-  async removeCartItem(key: string): Promise<any> {
-    try {
-      logger.log('Removing cart item:', { key });
-      
-      if (key.startsWith('local_')) {
-        const localCart = JSON.parse(localStorage.getItem('wc_cart') || '[]');
-        const itemIndex = parseInt(key.split('_')[2]);
-        
-        if (itemIndex >= 0 && itemIndex < localCart.length) {
-          localCart.splice(itemIndex, 1);
-          localStorage.setItem('wc_cart', JSON.stringify(localCart));
-          return { success: true };
-        }
-      }
-      
-      return { success: true };
-    } catch (error) {
-      logger.error('Remove cart item error:', error);
-      throw new Error('Failed to remove cart item');
-    }
-  }
-
-  // Orders
-  async getOrders(params?: {
-    customer?: number;
-    status?: string;
-    page?: number;
-    per_page?: number;
-    orderby?: string;
-    order?: string;
-  }): Promise<WooCommerceOrder[]> {
-    try {
-      logger.log('🔍 Starting order fetch with params:', params);
-      
-      const storedUser = localStorage.getItem('wc_user');
-      let finalParams = { ...params };
-      
-      if (storedUser) {
-        const userData = JSON.parse(storedUser);
-        logger.log('📱 User data from storage:', userData);
-        
-        if (userData.customerId && !finalParams.customer) {
-          finalParams.customer = userData.customerId;
-          logger.log('👤 Using customer ID:', userData.customerId);
-        }
-      }
-      
-      const queryParams = {
-        per_page: 20,
-        orderby: 'date',
-        order: 'desc',
-        ...finalParams
-      };
-      
-      logger.log('🚀 Making API call with params:', queryParams);
-      
-      const response: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
-        params: queryParams,
-        timeout: 25000
       });
-      
-      logger.log('✅ Orders API response status:', response.status);
-      logger.log('📦 Orders data received:', response.data?.length || 0, 'orders');
-      
-      let orders = response.data || [];
-      
-      // If no orders found with customer filter, try without customer filter
-      if (orders.length === 0 && finalParams.customer) {
-        logger.log('🔄 No orders found with customer ID, trying general fetch');
-        
-        const fallbackParams = {
-          per_page: 100, // Increased to get more orders
-          orderby: 'date',
-          order: 'desc'
-        };
-        
-        logger.log('🚀 Making fallback API call with params:', fallbackParams);
-        
-        const fallbackResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
-          params: fallbackParams,
-          timeout: 25000
+
+      if (response.data && response.data.length > 0) {
+        const customer = response.data[0];
+        logger.log('WooCommerce customer found:', customer);
+
+        // Use WordPress's built-in authentication endpoint to validate the username and password
+        const authResponse = await axios.post(`${WC_BASE_URL}/wp-json/jwt-auth/v1/token`, {
+          username: username,
+          password: password,
         });
-        
-        logger.log('✅ Fallback orders API response status:', fallbackResponse.status);
-        logger.log('📦 Fallback orders data received:', fallbackResponse.data?.length || 0, 'orders');
-        
-        const allOrders = fallbackResponse.data || [];
-        
-        // Filter by email and customer ID if we have orders
-        if (allOrders.length > 0 && storedUser) {
-          const userData = JSON.parse(storedUser);
-          logger.log('📧 Filtering orders by user data:', userData);
-          
-          orders = allOrders.filter(order => {
-            const matchesEmail = order.billing?.email === userData.email;
-            const matchesCustomerId = order.customer_id === userData.customerId;
-            
-            logger.log('🔍 Order check:', {
-              orderId: order.id,
-              orderEmail: order.billing?.email,
-              orderCustomerId: order.customer_id,
-              userEmail: userData.email,
-              userCustomerId: userData.customerId,
-              matchesEmail,
-              matchesCustomerId
-            });
-            
-            return matchesEmail || matchesCustomerId;
-          });
-          
-          logger.log('📦 Filtered orders result:', orders.length, 'orders');
-        } else {
-          orders = allOrders;
-        }
-      }
-      
-      logger.log('📦 Final orders result:', orders.length, 'orders');
-      return orders;
-    } catch (error: any) {
-      logger.error('❌ Orders fetch failed:', error);
-      
-      // Try one more time without any filters if we get authentication errors
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        logger.log('🔄 Authentication error, trying basic fetch...');
-        try {
-          const basicParams = {
-            per_page: 50,
-            orderby: 'date',
-            order: 'desc'
+
+        if (authResponse.data && authResponse.data.token) {
+          logger.log('WordPress authentication successful');
+
+          const user: WooCommerceUser = {
+            id: customer.id,
+            email: customer.email,
+            username: customer.username,
+            firstName: customer.first_name,
+            lastName: customer.last_name,
+            displayName: customer.display_name,
           };
-          
-          const basicResponse: AxiosResponse<WooCommerceOrder[]> = await this.api.get('/orders', { 
-            params: basicParams,
-            timeout: 25000
-          });
-          
-          logger.log('✅ Basic orders fetch successful:', basicResponse.data?.length || 0, 'orders');
-          return basicResponse.data || [];
-        } catch (basicError) {
-          logger.error('❌ Basic orders fetch also failed:', basicError);
+
+          return { user: user, customerId: customer.id };
+        } else {
+          logger.error('WordPress authentication failed');
+          throw new Error('Invalid username or password');
         }
+      } else {
+        logger.error('No WooCommerce customer found with that email');
+        throw new Error('No user found with that email');
       }
-      
-      return [];
-    }
-  }
-
-  async createOrder(orderData: WooCommerceOrder): Promise<WooCommerceOrder> {
-    try {
-      const response: AxiosResponse<WooCommerceOrder> = await this.api.post('/orders', orderData);
-      return response.data;
-    } catch (error) {
-      throw new Error('Failed to create order');
-    }
-  }
-
-  async getOrder(id: number): Promise<WooCommerceOrder> {
-    try {
-      const response: AxiosResponse<WooCommerceOrder> = await this.api.get(`/orders/${id}`);
-      return response.data;
-    } catch (error) {
-      throw new Error('Failed to fetch order');
-    }
-  }
-
-  // Authentication with improved JWT handling
-  async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
-    try {
-      logger.log('🔐 Attempting login with username:', username);
-      
-      // Try multiple JWT endpoint variations
-      const possibleJwtUrls = [
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
-      ];
-
-      let loginResponse;
-      let jwtUrl;
-
-      for (const url of possibleJwtUrls) {
-        try {
-          logger.log('🌐 Trying JWT URL:', url);
-          loginResponse = await axios.post(url, {
-            username,
-            password,
-          }, {
-            timeout: 10000,
-          });
-          jwtUrl = url;
-          logger.log('✅ JWT Login successful with URL:', url);
-          break;
-        } catch (error: any) {
-          logger.log('❌ JWT URL failed:', url, error.response?.status);
-          continue;
-        }
-      }
-
-      if (!loginResponse) {
-        // Fallback to basic auth if JWT is not available
-        logger.log('🔄 JWT not available, trying basic auth fallback');
-        
-        try {
-          // Try to authenticate with WooCommerce customer endpoint
-          const customerResponse = await this.api.get('/customers', {
-            params: {
-              email: username,
-              search: username,
-            }
-          });
-
-          if (customerResponse.data && customerResponse.data.length > 0) {
-            const customer = customerResponse.data[0];
-            
-            // Create a simple token for session management
-            const simpleToken = btoa(`${username}:${Date.now()}`);
-            localStorage.setItem('wc_jwt_token', simpleToken);
-            
-            const userData = {
-              email: customer.email,
-              username: customer.username || username,
-              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : username,
-            };
-            
-            logger.log('✅ Basic auth login successful');
-            
-            return {
-              token: simpleToken,
-              user: userData,
-              customerId: customer.id
-            };
-          } else {
-            throw new Error('Customer not found');
-          }
-        } catch (basicAuthError) {
-          logger.error('❌ Basic auth fallback failed:', basicAuthError);
-          throw new Error('Invalid username or password. Please check your credentials.');
-        }
-      }
-
-      const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
-      localStorage.setItem('wc_jwt_token', token);
-      
-      let customerId;
-      try {
-        logger.log('🔍 Looking for customer with email:', user_email);
-        const customerResponse = await this.api.get('/customers', {
-          params: {
-            email: user_email,
-          }
-        });
-        
-        logger.log('👥 Customer search response:', customerResponse.data);
-        
-        if (customerResponse.data && customerResponse.data.length > 0) {
-          customerId = customerResponse.data[0].id;
-          logger.log('✅ Found customer ID:', customerId);
-        }
-      } catch (customerError) {
-        logger.log('⚠️ Could not fetch customer ID:', customerError);
-      }
-      
-      const userData = {
-        email: user_email,
-        username: user_nicename,
-        displayName: user_display_name,
-      };
-      
-      logger.log('✅ Final login data:', { userData, customerId });
-      
-      return {
-        token,
-        user: userData,
-        customerId
-      };
     } catch (error: any) {
-      logger.error('❌ Login error:', error.response?.data || error.message);
-      
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.response?.status === 403) {
-        throw new Error('Invalid username or password');
-      } else if (error.response?.status === 404) {
-        throw new Error('Authentication service not available. Please contact support.');
-      }
-      
-      throw new Error('Login failed. Please check your credentials.');
+      logger.error('Login failed:', error);
+      throw new Error(error.response?.data?.message || 'Login failed. Please check your credentials.');
     }
-  }
+  },
 
-  async register(userData: {
-    username: string;
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-  }): Promise<any> {
+  register: async (userData: { username: string; email: string; password: string; first_name?: string; last_name?: string }): Promise<void> => {
     try {
-      logger.log('Attempting registration with data:', userData);
-      
-      const response = await this.api.post('/customers', {
-        username: userData.username,
+      logger.log('Attempting to register user in WordPress with username:', userData.username);
+
+      const auth = 'Basic ' + Buffer.from(WC_CONSUMER_KEY + ':' + WC_CONSUMER_SECRET).toString('base64');
+
+      const response = await axios.post(`${WC_BASE_URL}/wp-json/wc/v3/customers`, {
         email: userData.email,
+        username: userData.username,
         password: userData.password,
-        first_name: userData.first_name || '',
-        last_name: userData.last_name || '',
+        first_name: userData.first_name,
+        last_name: userData.last_name,
         billing: {
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
+          first_name: userData.first_name,
+          last_name: userData.last_name,
           email: userData.email,
         },
         shipping: {
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
+          first_name: userData.first_name,
+          last_name: userData.last_name,
+        }
+      }, {
+        headers: {
+          'Authorization': auth
         }
       });
-      
-      logger.log('Registration successful:', response.data);
-      return response.data;
-    } catch (error: any) {
-      logger.error('Registration error details:', error.response?.data || error.message);
-      
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.response?.data?.code === 'registration-error-email-exists') {
-        throw new Error('An account with this email already exists.');
-      } else if (error.response?.data?.code === 'registration-error-username-exists') {
-        throw new Error('This username is already taken.');
-      }
-      
-      throw new Error('Registration failed. Please check your information and try again.');
-    }
-  }
 
-  async validateToken(): Promise<boolean> {
-    try {
-      const token = localStorage.getItem('wc_jwt_token');
-      if (!token) return false;
-
-      // Check if token is JWT format
-      if (token.includes('.')) {
-        // Try to validate JWT token
-        const possibleValidateUrls = [
-          `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token/validate`,
-          `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token/validate`,
-        ];
-
-        for (const url of possibleValidateUrls) {
-          try {
-            await axios.post(url, {}, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-              timeout: 5000,
-            });
-            return true;
-          } catch (error) {
-            continue;
-          }
-        }
-        
-        // If validation fails, remove token
-        localStorage.removeItem('wc_jwt_token');
-        return false;
+      if (response.status === 201) {
+        logger.log('User registered successfully in WordPress');
       } else {
-        // Handle simple token (base64 encoded username:timestamp)
-        try {
-          const tokenData = atob(token);
-          const [, timestamp] = tokenData.split(':');
-          const tokenAge = Date.now() - parseInt(timestamp);
-          const twentyFourHours = 24 * 60 * 60 * 1000;
-          
-          if (tokenAge > twentyFourHours) {
-            localStorage.removeItem('wc_jwt_token');
-            return false;
-          }
-          
-          return true;
-        } catch (error) {
-          localStorage.removeItem('wc_jwt_token');
-          return false;
-        }
+        logger.error('Failed to register user in WordPress:', response.data);
+        throw new Error(response.data.message || 'Registration failed');
       }
-    } catch (error) {
-      logger.error('Token validation error:', error);
-      localStorage.removeItem('wc_jwt_token');
+    } catch (error: any) {
+      logger.error('Registration failed:', error);
+      throw new Error(error.response?.data?.message || 'Registration failed. Please try again.');
+    }
+  },
+
+  logout: (): void => {
+    // No direct logout endpoint in WooCommerce REST API, typically handled client-side by removing tokens/cookies
+    logger.log('Logging out from WordPress (client-side)');
+    // Remove any stored tokens or user data from local storage/cookies
+  },
+
+  validateToken: async (): Promise<boolean> => {
+    try {
+      // Check if the WooCommerce API is accessible and the credentials are valid
+      const auth = 'Basic ' + Buffer.from(WC_CONSUMER_KEY + ':' + WC_CONSUMER_SECRET).toString('base64');
+      const response = await axios.get(`${WC_BASE_URL}/wp-json/wc/v3/`, {
+        headers: {
+          'Authorization': auth
+        }
+      });
+
+      if (response.status === 200) {
+        logger.log('WooCommerce API is accessible and credentials are valid');
+        return true;
+      } else {
+        logger.error('WooCommerce API validation failed:', response.status);
+        return false;
+      }
+    } catch (error: any) {
+      logger.error('WooCommerce API validation failed:', error);
       return false;
     }
-  }
+  },
 
-  async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+  requestPasswordReset: async (email: string): Promise<void> => {
     try {
-      logger.log('🔑 Requesting password reset for email:', email);
+      logger.log('Requesting password reset for email:', email);
       
-      // WordPress Lost Password endpoint
-      const wpLostPasswordUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-login.php?action=lostpassword`;
-      
-      // Try WordPress REST API approach first
-      const wpApiUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/reset-password`;
-      
+      // Try WordPress REST API first (WordPress 5.7+)
       try {
-        const response = await axios.post(wpApiUrl, {
+        const response = await axios.post(`${WC_BASE_URL}/wp-json/wp/v2/users/reset-password`, {
           user_login: email
-        }, {
-          timeout: 10000,
-          headers: {
-            'Content-Type': 'application/json'
-          }
         });
         
-        logger.log('✅ WordPress REST API reset successful');
-        return {
-          success: true,
-          message: 'Password reset link sent to your email address.'
-        };
-      } catch (restApiError: any) {
-        logger.log('⚠️ WordPress REST API failed, trying form submission:', restApiError.response?.status);
-        
-        // Fallback to form submission approach
-        try {
-          const formData = new FormData();
-          formData.append('user_login', email);
-          formData.append('wp-submit', 'Get New Password');
-          
-          const formResponse = await axios.post(wpLostPasswordUrl, formData, {
-            timeout: 10000,
-            headers: {
-              'Content-Type': 'multipart/form-data'
-            },
-            maxRedirects: 0,
-            validateStatus: (status) => status < 400 || status === 302
-          });
-          
-          logger.log('✅ WordPress form submission successful');
-          return {
-            success: true,
-            message: 'Password reset link sent to your email address.'
-          };
-        } catch (formError: any) {
-          logger.error('❌ WordPress form submission failed:', formError.response?.status);
-          throw formError;
+        if (response.status === 200) {
+          logger.log('Password reset email sent via REST API');
+          return;
         }
+      } catch (restError) {
+        logger.log('REST API password reset failed, trying form submission:', restError);
       }
-    } catch (error: any) {
-      logger.error('❌ Password reset request failed:', error);
-      
-      if (error.response?.status === 404) {
-        return {
-          success: false,
-          message: 'No account found with this email address.'
-        };
-      } else if (error.response?.status === 429) {
-        return {
-          success: false,
-          message: 'Too many password reset requests. Please try again later.'
-        };
-      }
-      
-      return {
-        success: false,
-        message: 'Failed to send password reset email. Please try again.'
-      };
-    }
-  }
 
-  async resetPassword(resetKey: string, newPassword: string, userLogin: string): Promise<{ success: boolean; message: string }> {
-    try {
-      logger.log('🔑 Resetting password for user:', userLogin);
+      // Fallback to form submission to wp-login.php
+      const formData = new FormData();
+      formData.append('user_login', email);
+      formData.append('wp-submit', 'Get New Password');
+      formData.append('redirect_to', '');
       
-      // WordPress password reset endpoint
-      const wpResetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/reset-password`;
-      
-      try {
-        const response = await axios.post(wpResetUrl, {
-          key: resetKey,
-          login: userLogin,
-          password: newPassword
-        }, {
-          timeout: 10000,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        logger.log('✅ Password reset successful');
-        return {
-          success: true,
-          message: 'Password has been reset successfully.'
-        };
-      } catch (error: any) {
-        logger.error('❌ Password reset failed:', error.response?.data || error.message);
-        
-        if (error.response?.status === 400) {
-          return {
-            success: false,
-            message: 'Invalid reset key or the link has expired.'
-          };
-        } else if (error.response?.status === 404) {
-          return {
-            success: false,
-            message: 'User not found.'
-          };
-        }
-        
-        return {
-          success: false,
-          message: 'Failed to reset password. Please try again.'
-        };
-      }
-    } catch (error: any) {
-      logger.error('❌ Password reset error:', error);
-      return {
-        success: false,
-        message: 'Failed to reset password. Please try again.'
-      };
-    }
-  }
-
-  async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-    try {
-      logger.log('🔑 Changing password for authenticated user');
-      
-      const token = localStorage.getItem('wc_jwt_token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      
-      // Get current user data
-      const storedUser = localStorage.getItem('wc_user');
-      if (!storedUser) {
-        throw new Error('No user data found');
-      }
-      
-      const userData = JSON.parse(storedUser);
-      const customerId = userData.customerId;
-      
-      if (!customerId) {
-        throw new Error('Customer ID not found');
-      }
-      
-      // Update customer password via WooCommerce API
-      const response = await this.api.put(`/customers/${customerId}`, {
-        password: newPassword
+      const response = await axios.post(`${WC_BASE_URL}/wp-login.php?action=lostpassword`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
-      
-      logger.log('✅ Password changed successfully');
-      return {
-        success: true,
-        message: 'Password has been changed successfully.'
-      };
-    } catch (error: any) {
-      logger.error('❌ Password change failed:', error.response?.data || error.message);
-      
-      if (error.response?.status === 401) {
-        return {
-          success: false,
-          message: 'Authentication failed. Please log in again.'
-        };
-      } else if (error.response?.status === 403) {
-        return {
-          success: false,
-          message: 'You do not have permission to change the password.'
-        };
+
+      // WordPress doesn't return JSON for this endpoint, but if we get here without error, it likely worked
+      if (response.status === 200) {
+        logger.log('Password reset request submitted successfully');
+        return;
       }
-      
-      return {
-        success: false,
-        message: 'Failed to change password. Please try again.'
-      };
+
+      throw new Error('Password reset request failed');
+    } catch (error: any) {
+      logger.error('Password reset request failed:', error);
+      throw new Error(error.response?.data?.message || 'Failed to send password reset email. Please try again.');
     }
-  }
-
-  logout(): void {
-    localStorage.removeItem('wc_jwt_token');
-    localStorage.removeItem('wc_user');
-  }
-
-  // Helper method to get Store API nonce with better error handling
-  private async refreshStoreApiNonce(): Promise<void> {
-    try {
-      const storeApiUrl = this.config.baseURL.replace('/wp-json/wc/v3', '/wp-json/wc/store/v1');
-      const response = await axios.get(`${storeApiUrl}/cart`, {
-        timeout: 5000,
-      });
-      
-      this.storeApiNonce = response.headers['x-wc-store-api-nonce'] || null;
-      logger.log('Store API nonce refreshed:', this.storeApiNonce ? 'success' : 'not found');
-    } catch (error) {
-      logger.log('Could not refresh store API nonce, using local cart fallback');
-      this.storeApiNonce = null;
-    }
-  }
-
-  private async getStoreApiNonce(): Promise<string> {
-    if (!this.storeApiNonce) {
-      await this.refreshStoreApiNonce();
-    }
-    return this.storeApiNonce || '';
-  }
-}
-
-// Configuration with better environment variable handling
-const getEnvVar = (key: string, fallback: string): string => {
-  const value = import.meta.env[key];
-  if (!value && import.meta.env.PROD) {
-    logger.warn(`Missing environment variable: ${key}, using fallback`);
-  }
-  return value || fallback;
+  },
 };
-
-const wooCommerceConfig: WooCommerceConfig = {
-  baseURL: getEnvVar('VITE_WC_BASE_URL', 'https://localhost/threadx/threadxwp/wp-json/wc/v3'),
-  consumerKey: getEnvVar('VITE_WC_CONSUMER_KEY', 'ck_a928b57d9b663d3d5d5c05b38c0a8aeadbe72968'),
-  consumerSecret: getEnvVar('VITE_WC_CONSUMER_SECRET', 'cs_38320afaddc7a21545895e47ea2503ac16cc6805'),
-};
-
-export const wooCommerceApi = new WooCommerceAPI(wooCommerceConfig);
-export default wooCommerceApi;

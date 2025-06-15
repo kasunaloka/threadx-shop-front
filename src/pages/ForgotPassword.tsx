@@ -1,37 +1,44 @@
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, ArrowLeft } from 'lucide-react';
+import { Mail, ArrowLeft, AlertCircle } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useAuth } from '../context/AuthContext';
+import { wooCommerceApi } from '../utils/woocommerceApi';
+import { toast } from 'sonner';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const { resetPassword } = useAuth();
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     
     if (!email) {
+      setError('Please enter your email address.');
       return;
     }
 
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      setError('Please enter a valid email address.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const success = await resetPassword(email);
-      if (success) {
-        setIsSubmitted(true);
-      }
+      await wooCommerceApi.requestPasswordReset(email);
+      setIsSubmitted(true);
+      toast.success('Password reset email sent! Check your inbox.');
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to send password reset email. Please try again.';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -64,7 +71,7 @@ const ForgotPassword = () => {
                   Back to Login
                 </Link>
                 <button
-                  onClick={() => {setIsSubmitted(false); setEmail('');}}
+                  onClick={() => {setIsSubmitted(false); setEmail(''); setError('');}}
                   className="w-full text-sm text-blue-600 hover:text-blue-700"
                 >
                   Try with a different email
@@ -88,7 +95,7 @@ const ForgotPassword = () => {
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-black mb-2">Forgot Password?</h1>
             <p className="text-gray-600">
-              Enter your email address and we'll send you a link to reset your password.
+              Enter your email address and we'll send you a link to reset your password via WordPress.
             </p>
           </div>
 
@@ -106,6 +113,12 @@ const ForgotPassword = () => {
                 required
                 disabled={isLoading}
               />
+              {error && (
+                <div className="mt-2 flex items-center text-sm text-red-600">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {error}
+                </div>
+              )}
             </div>
 
             <button
