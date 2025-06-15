@@ -545,18 +545,22 @@ class WooCommerceAPI {
     try {
       logger.log('🔑 Requesting password reset for:', emailOrUsername);
 
-      const resetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/user/reset_password`;
+      // Using the standard WordPress REST API endpoint for lost passwords
+      const resetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/lost-password`;
 
+      // WordPress core endpoint expects 'user_login'
       await axios.post(resetUrl, {
-        email: emailOrUsername,
-        login: emailOrUsername
+        user_login: emailOrUsername
       });
 
       logger.log('✅ Password reset request successful. Email should be sent.');
     } catch (error: any) {
       logger.error('❌ Password reset request failed:', error.response?.data || error.message);
       if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
+        // The message from WordPress can be informative (e.g., "Invalid username or email.")
+        // but for security it's often better to not expose it directly.
+        // We will throw a generic error to be handled by the UI.
+        // The specific error is logged for debugging.
       }
       throw new Error('An error occurred while trying to reset the password. Please try again.');
     }
