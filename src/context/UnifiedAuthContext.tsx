@@ -1,7 +1,7 @@
-
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { supabase } from '../lib/supabase';
+import { AuthSyncService } from '../utils/authSync';
 import { toast } from 'sonner';
 import { logger } from '../utils/logger';
 
@@ -12,6 +12,8 @@ interface User {
   displayName: string;
   customerId?: number;
   supabaseId?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 interface AuthState {
@@ -39,6 +41,7 @@ interface AuthContextType extends AuthState {
   }, provider?: 'wordpress' | 'supabase') => Promise<boolean>;
   logout: () => void;
   resetPassword: (email: string) => Promise<boolean>;
+  syncUserData: (user: User, provider: 'wordpress' | 'supabase') => Promise<void>;
 }
 
 const UnifiedAuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -92,6 +95,22 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
     authProvider: null,
   });
 
+  // Sync user data between WordPress and Supabase using the new service
+  const syncUserData = async (user: User, provider: 'wordpress' | 'supabase') => {
+    try {
+      logger.log('UnifiedAuth: Syncing user data between platforms:', { user, provider });
+
+      if (provider === 'wordpress') {
+        await AuthSyncService.syncWordPressToSupabase(user);
+      } else if (provider === 'supabase') {
+        await AuthSyncService.syncSupabaseToWordPress(user);
+      }
+    } catch (error) {
+      logger.error('UnifiedAuth: Failed to sync user data:', error);
+      // Don't throw error to avoid blocking login
+    }
+  };
+
   // Check for existing authentication on mount
   useEffect(() => {
     const checkAuth = async () => {
@@ -104,9 +123,16 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
             email: session.user.email || '',
             username: session.user.email?.split('@')[0] || '',
             displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || '',
+            firstName: session.user.user_metadata?.first_name,
+            lastName: session.user.user_metadata?.last_name,
           };
-          logger.log('UnifiedAuth: Restored Supabase user from session:', userData);
-          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, provider: 'supabase' } });
+          
+          // Get unified profile data
+          const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+          const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+          
+          logger.log('UnifiedAuth: Restored Supabase user from session:', finalUserData);
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
           return;
         }
 
@@ -116,8 +142,13 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
           const storedUser = localStorage.getItem('wc_user');
           if (storedUser) {
             const userData = JSON.parse(storedUser);
-            logger.log('UnifiedAuth: Restored WordPress user from storage:', userData);
-            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, provider: 'wordpress' } });
+            
+            // Get unified profile data
+            const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+            const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+            
+            logger.log('UnifiedAuth: Restored WordPress user from storage:', finalUserData);
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'wordpress' } });
             return;
           }
         }
@@ -133,15 +164,23 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
 
     // Set up Supabase auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
           const userData = {
             supabaseId: session.user.id,
             email: session.user.email || '',
             username: session.user.email?.split('@')[0] || '',
             displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || '',
+            firstName: session.user.user_metadata?.first_name,
+            lastName: session.user.user_metadata?.last_name,
           };
-          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, provider: 'supabase' } });
+          
+          // Sync data and get unified profile
+          await syncUserData(userData, 'supabase');
+          const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+          const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+          
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
         } else if (event === 'SIGNED_OUT') {
           // Only logout if currently using Supabase auth
           if (state.authProvider === 'supabase') {
@@ -172,10 +211,17 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
           email: data.user.email || username,
           username: data.user.email?.split('@')[0] || username,
           displayName: data.user.user_metadata?.display_name || data.user.email?.split('@')[0] || username,
+          firstName: data.user.user_metadata?.first_name,
+          lastName: data.user.user_metadata?.last_name,
         };
 
-        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, provider: 'supabase' } });
-        toast.success(`Welcome back, ${userData.displayName}!`);
+        // Sync user data and get unified profile
+        await syncUserData(userData, 'supabase');
+        const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+        const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+        
+        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
+        toast.success(`Welcome back, ${finalUserData.displayName}!`);
         return true;
       } else {
         // WordPress login
@@ -187,12 +233,19 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
           email: user.email || username,
           username: user.username || username,
           displayName: user.displayName || user.username || username,
-          customerId: customerId
+          customerId: customerId,
+          firstName: user.firstName,
+          lastName: user.lastName,
         };
         
-        localStorage.setItem('wc_user', JSON.stringify(userData));
-        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: userData, provider: 'wordpress' } });
-        toast.success(`Welcome back, ${userData.displayName}!`);
+        // Sync user data and get unified profile
+        await syncUserData(userData, 'wordpress');
+        const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+        const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+        
+        localStorage.setItem('wc_user', JSON.stringify(finalUserData));
+        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'wordpress' } });
+        toast.success(`Welcome back, ${finalUserData.displayName}!`);
         return true;
       }
     } catch (error: any) {
@@ -317,6 +370,7 @@ export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ childre
         register,
         logout,
         resetPassword,
+        syncUserData,
       }}
     >
       {children}
