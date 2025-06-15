@@ -6,9 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
-import { AuthProvider as SupabaseAuthProvider } from "./context/SupabaseAuthContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import ProtectedRoute from "./components/ProtectedRoute";
 import Index from "./pages/Index";
 import Products from "./pages/Products";
 import ProductDetail from "./pages/ProductDetail";
@@ -16,7 +14,6 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import SupabaseLogin from "./pages/SupabaseLogin";
 import Orders from "./pages/Orders";
 import OrderSuccess from "./pages/OrderSuccess";
 import Profile from "./pages/Profile";
@@ -40,60 +37,25 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BrowserRouter>
-          <SupabaseAuthProvider>
-            <AuthProvider>
-              <CartProvider>
-                <Toaster />
-                <Sonner />
-                <Routes>
-                  <Route path="/login" element={<SupabaseLogin />} />
-                  <Route path="/wc-login" element={<Login />} />
-                  <Route path="/register" element={<Register />} />
-                  <Route path="/" element={
-                    <ProtectedRoute>
-                      <Index />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/products" element={
-                    <ProtectedRoute>
-                      <Products />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/product/:id" element={
-                    <ProtectedRoute>
-                      <ProductDetail />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/cart" element={
-                    <ProtectedRoute>
-                      <Cart />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/checkout" element={
-                    <ProtectedRoute>
-                      <Checkout />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/orders" element={
-                    <ProtectedRoute>
-                      <Orders />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/order-success" element={
-                    <ProtectedRoute>
-                      <OrderSuccess />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/profile" element={
-                    <ProtectedRoute>
-                      <Profile />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </CartProvider>
-            </AuthProvider>
-          </SupabaseAuthProvider>
+          <AuthProvider>
+            <CartProvider>
+              <Toaster />
+              <Sonner />
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/products" element={<Products />} />
+                <Route path="/product/:id" element={<ProductDetail />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/checkout" element={<Checkout />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/orders" element={<Orders />} />
+                <Route path="/order-success" element={<OrderSuccess />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </CartProvider>
+          </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
