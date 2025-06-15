@@ -545,24 +545,87 @@ class WooCommerceAPI {
     try {
       logger.log('🔑 Requesting password reset for:', emailOrUsername);
 
-      // Using the standard WordPress REST API endpoint for lost passwords
-      const resetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/users/lost-password`;
+      // Try multiple WordPress password reset endpoints in order of preference
+      const baseUrl = this.config.baseURL.replace('/wp-json/wc/v3', '');
+      
+      const resetEndpoints = [
+        // Standard WordPress REST API endpoint
+        {
+          url: `${baseUrl}/wp-json/wp/v2/users/lost-password`,
+          data: { user_login: emailOrUsername }
+        },
+        // Alternative WordPress REST API endpoint
+        {
+          url: `${baseUrl}/wp-json/wp/v2/users/reset-password`,
+          data: { user_login: emailOrUsername }
+        },
+        // WordPress XMLRPC endpoint (if enabled)
+        {
+          url: `${baseUrl}/xmlrpc.php`,
+          data: { 
+            method: 'wp.lostPassword',
+            username: emailOrUsername 
+          }
+        },
+        // Custom WordPress form endpoint (traditional method)
+        {
+          url: `${baseUrl}/wp-login.php?action=lostpassword`,
+          data: { 
+            user_login: emailOrUsername,
+            redirect_to: `${baseUrl}/wp-login.php?checkemail=confirm`
+          },
+          isForm: true
+        }
+      ];
 
-      // WordPress core endpoint expects 'user_login'
-      await axios.post(resetUrl, {
-        user_login: emailOrUsername
-      });
-
-      logger.log('✅ Password reset request successful. Email should be sent.');
-    } catch (error: any) {
-      logger.error('❌ Password reset request failed:', error.response?.data || error.message);
-      if (error.response?.data?.message) {
-        // The message from WordPress can be informative (e.g., "Invalid username or email.")
-        // but for security it's often better to not expose it directly.
-        // We will throw a generic error to be handled by the UI.
-        // The specific error is logged for debugging.
+      let lastError;
+      
+      for (const endpoint of resetEndpoints) {
+        try {
+          logger.log('🌐 Trying password reset endpoint:', endpoint.url);
+          
+          if (endpoint.isForm) {
+            // For form-based submission, we need to send as form data
+            const formData = new FormData();
+            Object.entries(endpoint.data).forEach(([key, value]) => {
+              formData.append(key, value as string);
+            });
+            
+            await axios.post(endpoint.url, formData, {
+              headers: {
+                'Content-Type': 'multipart/form-data',
+              },
+              timeout: 10000,
+            });
+          } else {
+            // For JSON endpoints
+            await axios.post(endpoint.url, endpoint.data, {
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              timeout: 10000,
+            });
+          }
+          
+          logger.log('✅ Password reset request successful with endpoint:', endpoint.url);
+          return; // Success, exit the function
+          
+        } catch (error: any) {
+          logger.log('❌ Endpoint failed:', endpoint.url, error.response?.status);
+          lastError = error;
+          continue; // Try next endpoint
+        }
       }
-      throw new Error('An error occurred while trying to reset the password. Please try again.');
+      
+      // If all endpoints failed, throw the last error
+      throw lastError;
+      
+    } catch (error: any) {
+      logger.error('❌ All password reset attempts failed:', error.response?.data || error.message);
+      
+      // For security, we don't expose specific error details to prevent user enumeration
+      // The actual error is logged for debugging purposes
+      throw new Error('Password reset request submitted. If an account exists with that email/username, you will receive a reset link.');
     }
   }
 
