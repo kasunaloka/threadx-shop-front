@@ -541,6 +541,27 @@ class WooCommerceAPI {
     }
   }
 
+  async requestPasswordReset(emailOrUsername: string): Promise<void> {
+    try {
+      logger.log('🔑 Requesting password reset for:', emailOrUsername);
+
+      const resetUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/user/reset_password`;
+
+      await axios.post(resetUrl, {
+        email: emailOrUsername,
+        login: emailOrUsername
+      });
+
+      logger.log('✅ Password reset request successful. Email should be sent.');
+    } catch (error: any) {
+      logger.error('❌ Password reset request failed:', error.response?.data || error.message);
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      }
+      throw new Error('An error occurred while trying to reset the password. Please try again.');
+    }
+  }
+
   // Authentication with improved JWT handling
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
