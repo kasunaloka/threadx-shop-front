@@ -29,7 +29,7 @@ const Register = () => {
     
     console.log('Form submitted with data:', formData);
     
-    // Validation
+    // Enhanced validation
     if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.username.trim() || !formData.email.trim() || !formData.password.trim()) {
       toast.error('Please fill in all required fields.');
       return;
@@ -75,6 +75,7 @@ const Register = () => {
 
     if (success) {
       console.log('Registration successful, redirecting to login...');
+      toast.success('Registration successful! Please log in with your new account.');
       navigate('/login');
     }
   };
@@ -134,10 +135,13 @@ const Register = () => {
                 value={formData.username}
                 onChange={handleInputChange}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Choose a username"
+                placeholder="Choose a unique username"
                 required
                 disabled={isLoading}
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Username will be used for your account identification
+              </p>
             </div>
 
             <div>
@@ -154,6 +158,9 @@ const Register = () => {
                 required
                 disabled={isLoading}
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Email must be unique - cannot be used for multiple accounts
+              </p>
             </div>
 
             <div>
@@ -166,7 +173,7 @@ const Register = () => {
                 value={formData.password}
                 onChange={handleInputChange}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your password"
+                placeholder="Enter your password (min 8 characters)"
                 required
                 disabled={isLoading}
               />

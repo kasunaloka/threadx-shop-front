@@ -398,7 +398,7 @@ class WooCommerceAPI {
     }
   }
 
-  // Orders
+  // Orders with enhanced customer ID/username matching
   async getOrders(params?: {
     customer?: number;
     status?: string;
@@ -417,6 +417,7 @@ class WooCommerceAPI {
         const userData = JSON.parse(storedUser);
         logger.log('📱 User data from storage:', userData);
         
+        // Use customer ID if available
         if (userData.customerId && !finalParams.customer) {
           finalParams.customer = userData.customerId;
           logger.log('👤 Using customer ID:', userData.customerId);
@@ -442,6 +443,7 @@ class WooCommerceAPI {
       
       let orders = response.data || [];
       
+      // Enhanced filtering logic using customer ID and username
       if (orders.length === 0 && finalParams.customer) {
         logger.log('🔄 No orders found with customer ID, trying general fetch');
         
@@ -468,20 +470,36 @@ class WooCommerceAPI {
           logger.log('📧 Filtering orders by user data:', userData);
           
           orders = allOrders.filter(order => {
-            const matchesEmail = order.billing?.email === userData.email;
+            // Match by customer ID (primary)
             const matchesCustomerId = order.customer_id === userData.customerId;
+            
+            // Match by username in billing info (secondary)
+            const matchesUsername = order.billing?.first_name?.toLowerCase() === userData.username?.toLowerCase() ||
+                                   order.billing?.last_name?.toLowerCase() === userData.username?.toLowerCase();
+            
+            // Match by display name (tertiary)
+            const matchesDisplayName = userData.displayName && (
+              order.billing?.first_name?.toLowerCase().includes(userData.displayName.toLowerCase()) ||
+              order.billing?.last_name?.toLowerCase().includes(userData.displayName.toLowerCase())
+            );
+            
+            // Keep email as fallback
+            const matchesEmail = order.billing?.email === userData.email;
             
             logger.log('🔍 Order check:', {
               orderId: order.id,
-              orderEmail: order.billing?.email,
               orderCustomerId: order.customer_id,
-              userEmail: userData.email,
+              orderBilling: order.billing,
               userCustomerId: userData.customerId,
-              matchesEmail,
-              matchesCustomerId
+              userUsername: userData.username,
+              userDisplayName: userData.displayName,
+              matchesCustomerId,
+              matchesUsername,
+              matchesDisplayName,
+              matchesEmail
             });
             
-            return matchesEmail || matchesCustomerId;
+            return matchesCustomerId || matchesUsername || matchesDisplayName || matchesEmail;
           });
           
           logger.log('📦 Filtered orders result:', orders.length, 'orders');
@@ -538,6 +556,105 @@ class WooCommerceAPI {
     }
   }
 
+  // Enhanced registration with duplicate email check
+  async register(userData: {
+    username: string;
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+  }): Promise<any> {
+    try {
+      logger.log('Attempting registration with data:', userData);
+      
+      // First check if email already exists
+      try {
+        const existingCustomers = await this.api.get('/customers', {
+          params: {
+            email: userData.email,
+            per_page: 1
+          }
+        });
+        
+        if (existingCustomers.data && existingCustomers.data.length > 0) {
+          throw new Error('An account with this email already exists. Please use a different email or sign in to your existing account.');
+        }
+      } catch (checkError: any) {
+        if (checkError.message.includes('email already exists')) {
+          throw checkError;
+        }
+        // If check fails for other reasons, continue with registration attempt
+        logger.log('Email check failed, proceeding with registration:', checkError.message);
+      }
+      
+      // Also check if username exists
+      try {
+        const existingByUsername = await this.api.get('/customers', {
+          params: {
+            search: userData.username,
+            per_page: 10
+          }
+        });
+        
+        if (existingByUsername.data && existingByUsername.data.length > 0) {
+          const usernameExists = existingByUsername.data.some((customer: any) => 
+            customer.username === userData.username
+          );
+          
+          if (usernameExists) {
+            throw new Error('This username is already taken. Please choose a different username.');
+          }
+        }
+      } catch (usernameError: any) {
+        if (usernameError.message.includes('username is already taken')) {
+          throw usernameError;
+        }
+        logger.log('Username check failed, proceeding with registration:', usernameError.message);
+      }
+      
+      const response = await this.api.post('/customers', {
+        username: userData.username,
+        email: userData.email,
+        password: userData.password,
+        first_name: userData.first_name || '',
+        last_name: userData.last_name || '',
+        billing: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          email: userData.email,
+        },
+        shipping: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+        }
+      });
+      
+      logger.log('Registration successful:', response.data);
+      return response.data;
+    } catch (error: any) {
+      logger.error('Registration error details:', error.response?.data || error.message);
+      
+      if (error.message.includes('email already exists') || error.message.includes('username is already taken')) {
+        throw error;
+      } else if (error.response?.data?.message) {
+        // Handle specific WooCommerce error messages
+        if (error.response.data.message.includes('email') && error.response.data.message.includes('exists')) {
+          throw new Error('An account with this email already exists. Please use a different email or sign in to your existing account.');
+        } else if (error.response.data.message.includes('username') && error.response.data.message.includes('exists')) {
+          throw new Error('This username is already taken. Please choose a different username.');
+        } else {
+          throw new Error(error.response.data.message);
+        }
+      } else if (error.response?.data?.code === 'registration-error-email-exists') {
+        throw new Error('An account with this email already exists. Please use a different email or sign in to your existing account.');
+      } else if (error.response?.data?.code === 'registration-error-username-exists') {
+        throw new Error('This username is already taken. Please choose a different username.');
+      }
+      
+      throw new Error('Registration failed. Please check your information and try again.');
+    }
+  }
+
   // Authentication with improved error handling and fallback
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
@@ -589,26 +706,28 @@ class WooCommerceAPI {
         logger.log('🔄 JWT failed, trying WooCommerce customer authentication...');
         
         try {
-          // First, try to find the customer by email or username
-          const customerSearchResponse = await this.api.get('/customers', {
+          // Search by username first, then by email
+          let customer = null;
+          
+          // Try username search first
+          const usernameSearchResponse = await this.api.get('/customers', {
             params: {
               search: username,
               per_page: 10
             }
           });
 
-          logger.log('👥 Customer search response:', customerSearchResponse.data);
+          logger.log('👥 Username search response:', usernameSearchResponse.data);
           
-          let customer = null;
-          if (customerSearchResponse.data && customerSearchResponse.data.length > 0) {
-            // Find exact match by email or username
-            customer = customerSearchResponse.data.find((c: any) => 
-              c.email === username || c.username === username
+          if (usernameSearchResponse.data && usernameSearchResponse.data.length > 0) {
+            // Find exact match by username
+            customer = usernameSearchResponse.data.find((c: any) => 
+              c.username === username
             );
           }
 
+          // If not found by username, try email search
           if (!customer) {
-            // Try searching by email specifically
             const emailSearchResponse = await this.api.get('/customers', {
               params: {
                 email: username
@@ -621,7 +740,7 @@ class WooCommerceAPI {
           }
 
           if (customer) {
-            logger.log('✅ Customer found:', customer.id, customer.email);
+            logger.log('✅ Customer found:', customer.id, customer.email, customer.username);
             
             // Create a mock token for the session
             const mockToken = btoa(JSON.stringify({
@@ -647,7 +766,7 @@ class WooCommerceAPI {
               customerId: customer.id
             };
           } else {
-            throw new Error('No customer found with that email or username');
+            throw new Error('No customer found with that username or email');
           }
           
         } catch (customerError: any) {
@@ -716,50 +835,6 @@ class WooCommerceAPI {
       }
       
       throw new Error('Login failed. Please check your credentials and try again.');
-    }
-  }
-
-  async register(userData: {
-    username: string;
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-  }): Promise<any> {
-    try {
-      logger.log('Attempting registration with data:', userData);
-      
-      const response = await this.api.post('/customers', {
-        username: userData.username,
-        email: userData.email,
-        password: userData.password,
-        first_name: userData.first_name || '',
-        last_name: userData.last_name || '',
-        billing: {
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
-          email: userData.email,
-        },
-        shipping: {
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
-        }
-      });
-      
-      logger.log('Registration successful:', response.data);
-      return response.data;
-    } catch (error: any) {
-      logger.error('Registration error details:', error.response?.data || error.message);
-      
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.response?.data?.code === 'registration-error-email-exists') {
-        throw new Error('An account with this email already exists.');
-      } else if (error.response?.data?.code === 'registration-error-username-exists') {
-        throw new Error('This username is already taken.');
-      }
-      
-      throw new Error('Registration failed. Please check your information and try again.');
     }
   }
 

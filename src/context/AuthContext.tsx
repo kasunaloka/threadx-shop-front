@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
@@ -118,10 +119,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { user, customerId } = await wooCommerceApi.login(username, password);
       logger.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
       
-      // Ensure we have proper user data
+      // Ensure we have proper user data with emphasis on username/customerId
       const userData = {
         id: user.id,
-        email: user.email || username, // Fallback to username if email is missing
+        email: user.email || username,
         username: user.username || username,
         displayName: user.displayName || user.username || username,
         customerId: customerId
@@ -133,7 +134,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('wc_user', JSON.stringify(userData));
       
       dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
-      toast.success('Login successful!');
+      toast.success(`Welcome back, ${userData.displayName}!`);
       return true;
     } catch (error: any) {
       logger.error('AuthContext: Login failed:', error);
@@ -167,14 +168,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       
       dispatch({ type: 'SET_LOADING', payload: false });
-      toast.success('Registration successful! You can now log in.');
+      toast.success('Registration successful! You can now log in with your username and password.');
       return true;
     } catch (error: any) {
       logger.error('Registration failed:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
       
-      // Show the specific error message
-      const errorMessage = error.message || 'Registration failed. Please try again.';
+      // Show the specific error message with better UX
+      let errorMessage = 'Registration failed. Please try again.';
+      
+      if (error.message.includes('email already exists')) {
+        errorMessage = 'This email is already registered. Please use a different email or sign in to your existing account.';
+      } else if (error.message.includes('username is already taken')) {
+        errorMessage = 'This username is already taken. Please choose a different username.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       toast.error(errorMessage);
       return false;
     }
