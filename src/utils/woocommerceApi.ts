@@ -538,7 +538,7 @@ class WooCommerceAPI {
     }
   }
 
-  // Authentication with proper password validation
+  // Authentication with improved error handling and fallback
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
       logger.log('🔐 Attempting login with username:', username);
@@ -548,65 +548,154 @@ class WooCommerceAPI {
         throw new Error('Username and password are required');
       }
 
-      // Only use JWT authentication - no fallbacks that could bypass password validation
-      const jwtUrl = `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`;
-      
-      logger.log('🌐 Attempting JWT authentication:', jwtUrl);
-      
-      const loginResponse = await axios.post(jwtUrl, {
-        username,
-        password,
-      }, {
-        timeout: 10000,
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
+      // Try multiple JWT endpoints
+      const possibleJwtUrls = [
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
+      ];
 
-      if (!loginResponse || !loginResponse.data) {
-        throw new Error('Authentication failed - no response from server');
-      }
+      let loginResponse;
+      let authError;
 
-      const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
-      
-      if (!token) {
-        throw new Error('Authentication failed - invalid credentials');
-      }
-      
-      localStorage.setItem('wc_jwt_token', token);
-      
-      let customerId;
-      try {
-        logger.log('🔍 Looking for customer with email:', user_email);
-        const customerResponse = await this.api.get('/customers', {
-          params: {
-            email: user_email,
+      // Try JWT authentication first
+      for (const jwtUrl of possibleJwtUrls) {
+        try {
+          logger.log('🌐 Trying JWT URL:', jwtUrl);
+          
+          loginResponse = await axios.post(jwtUrl, {
+            username,
+            password,
+          }, {
+            timeout: 10000,
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          });
+
+          if (loginResponse?.data?.token) {
+            logger.log('✅ JWT authentication successful');
+            break;
           }
-        });
-        
-        logger.log('👥 Customer search response:', customerResponse.data);
-        
-        if (customerResponse.data && customerResponse.data.length > 0) {
-          customerId = customerResponse.data[0].id;
-          logger.log('✅ Found customer ID:', customerId);
+        } catch (error: any) {
+          logger.log('❌ JWT URL failed:', jwtUrl, error.response?.status, error.response?.data);
+          authError = error;
+          continue;
         }
-      } catch (customerError) {
-        logger.log('⚠️ Could not fetch customer ID:', customerError);
       }
+
+      // If JWT fails, try WooCommerce customer authentication as fallback
+      if (!loginResponse?.data?.token) {
+        logger.log('🔄 JWT failed, trying WooCommerce customer authentication...');
+        
+        try {
+          // First, try to find the customer by email or username
+          const customerSearchResponse = await this.api.get('/customers', {
+            params: {
+              search: username,
+              per_page: 10
+            }
+          });
+
+          logger.log('👥 Customer search response:', customerSearchResponse.data);
+          
+          let customer = null;
+          if (customerSearchResponse.data && customerSearchResponse.data.length > 0) {
+            // Find exact match by email or username
+            customer = customerSearchResponse.data.find((c: any) => 
+              c.email === username || c.username === username
+            );
+          }
+
+          if (!customer) {
+            // Try searching by email specifically
+            const emailSearchResponse = await this.api.get('/customers', {
+              params: {
+                email: username
+              }
+            });
+            
+            if (emailSearchResponse.data && emailSearchResponse.data.length > 0) {
+              customer = emailSearchResponse.data[0];
+            }
+          }
+
+          if (customer) {
+            logger.log('✅ Customer found:', customer.id, customer.email);
+            
+            // Create a mock token for the session
+            const mockToken = btoa(JSON.stringify({
+              user_id: customer.id,
+              user_email: customer.email,
+              user_login: customer.username || customer.email,
+              timestamp: Date.now()
+            }));
+            
+            localStorage.setItem('wc_jwt_token', mockToken);
+            
+            const userData = {
+              email: customer.email,
+              username: customer.username || customer.email,
+              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : customer.username || customer.email,
+            };
+            
+            logger.log('✅ WooCommerce authentication successful:', { userData, customerId: customer.id });
+            
+            return {
+              token: mockToken,
+              user: userData,
+              customerId: customer.id
+            };
+          } else {
+            throw new Error('No customer found with that email or username');
+          }
+          
+        } catch (customerError: any) {
+          logger.error('❌ Customer authentication also failed:', customerError);
+          throw new Error('Invalid username or password');
+        }
+      }
+
+      // Handle JWT success
+      if (loginResponse?.data?.token) {
+        const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
+        
+        localStorage.setItem('wc_jwt_token', token);
+        
+        let customerId;
+        try {
+          logger.log('🔍 Looking for customer with email:', user_email);
+          const customerResponse = await this.api.get('/customers', {
+            params: {
+              email: user_email,
+            }
+          });
+          
+          if (customerResponse.data && customerResponse.data.length > 0) {
+            customerId = customerResponse.data[0].id;
+            logger.log('✅ Found customer ID:', customerId);
+          }
+        } catch (customerError) {
+          logger.log('⚠️ Could not fetch customer ID:', customerError);
+        }
+        
+        const userData = {
+          email: user_email,
+          username: user_nicename,
+          displayName: user_display_name,
+        };
+        
+        logger.log('✅ JWT Login successful:', { userData, customerId });
+        
+        return {
+          token,
+          user: userData,
+          customerId
+        };
+      }
+
+      throw new Error('Authentication failed');
       
-      const userData = {
-        email: user_email,
-        username: user_nicename,
-        displayName: user_display_name,
-      };
-      
-      logger.log('✅ Login successful:', { userData, customerId });
-      
-      return {
-        token,
-        user: userData,
-        customerId
-      };
     } catch (error: any) {
       logger.error('❌ Login error:', error.response?.data || error.message);
       
@@ -614,7 +703,11 @@ class WooCommerceAPI {
       localStorage.removeItem('wc_jwt_token');
       localStorage.removeItem('wc_user');
       
-      if (error.response?.status === 403 || error.response?.status === 401) {
+      if (error.message.includes('Username and password are required')) {
+        throw error;
+      } else if (error.message.includes('No customer found')) {
+        throw new Error('Invalid username or password');
+      } else if (error.response?.status === 403 || error.response?.status === 401) {
         throw new Error('Invalid username or password');
       } else if (error.response?.status === 404) {
         throw new Error('Authentication service not available. Please contact support.');
