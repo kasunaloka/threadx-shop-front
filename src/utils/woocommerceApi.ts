@@ -233,9 +233,9 @@ class WooCommerceAPI {
           key: `local_${item.id}_${index}`,
           id: item.id,
           quantity: item.quantity,
-          name: `Product ${item.id}`, // Will be populated by the frontend
+          name: `Product ${item.id}`,
           prices: {
-            price: 0, // Will be populated by the frontend
+            price: 0,
           },
           variation: item.variation || {},
           images: [],
@@ -442,12 +442,11 @@ class WooCommerceAPI {
       
       let orders = response.data || [];
       
-      // If no orders found with customer filter, try without customer filter
       if (orders.length === 0 && finalParams.customer) {
         logger.log('🔄 No orders found with customer ID, trying general fetch');
         
         const fallbackParams = {
-          per_page: 100, // Increased to get more orders
+          per_page: 100,
           orderby: 'date',
           order: 'desc'
         };
@@ -464,7 +463,6 @@ class WooCommerceAPI {
         
         const allOrders = fallbackResponse.data || [];
         
-        // Filter by email and customer ID if we have orders
         if (allOrders.length > 0 && storedUser) {
           const userData = JSON.parse(storedUser);
           logger.log('📧 Filtering orders by user data:', userData);
@@ -497,7 +495,6 @@ class WooCommerceAPI {
     } catch (error: any) {
       logger.error('❌ Orders fetch failed:', error);
       
-      // Try one more time without any filters if we get authentication errors
       if (error.response?.status === 401 || error.response?.status === 403) {
         logger.log('🔄 Authentication error, trying basic fetch...');
         try {
@@ -541,12 +538,17 @@ class WooCommerceAPI {
     }
   }
 
-  // Authentication with improved JWT handling
+  // Authentication with proper password validation
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
       logger.log('🔐 Attempting login with username:', username);
       
-      // Try multiple JWT endpoint variations
+      // Validate input parameters
+      if (!username || !password) {
+        throw new Error('Username and password are required');
+      }
+
+      // Try JWT authentication first
       const possibleJwtUrls = [
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
@@ -575,48 +577,18 @@ class WooCommerceAPI {
       }
 
       if (!loginResponse) {
-        // Fallback to basic auth if JWT is not available
-        logger.log('🔄 JWT not available, trying basic auth fallback');
-        
-        try {
-          // Try to authenticate with WooCommerce customer endpoint
-          const customerResponse = await this.api.get('/customers', {
-            params: {
-              email: username,
-              search: username,
-            }
-          });
-
-          if (customerResponse.data && customerResponse.data.length > 0) {
-            const customer = customerResponse.data[0];
-            
-            // Create a simple token for session management
-            const simpleToken = btoa(`${username}:${Date.now()}`);
-            localStorage.setItem('wc_jwt_token', simpleToken);
-            
-            const userData = {
-              email: customer.email,
-              username: customer.username || username,
-              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : username,
-            };
-            
-            logger.log('✅ Basic auth login successful');
-            
-            return {
-              token: simpleToken,
-              user: userData,
-              customerId: customer.id
-            };
-          } else {
-            throw new Error('Customer not found');
-          }
-        } catch (basicAuthError) {
-          logger.error('❌ Basic auth fallback failed:', basicAuthError);
-          throw new Error('Invalid username or password. Please check your credentials.');
-        }
+        // If JWT is not available, we should NOT fall back to insecure authentication
+        // This was the security vulnerability - the fallback didn't validate passwords
+        logger.log('❌ JWT authentication not available and no secure fallback configured');
+        throw new Error('Authentication service is not properly configured. Please contact support.');
       }
 
       const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
+      
+      if (!token) {
+        throw new Error('Authentication failed - no token received');
+      }
+      
       localStorage.setItem('wc_jwt_token', token);
       
       let customerId;
@@ -741,23 +713,9 @@ class WooCommerceAPI {
         localStorage.removeItem('wc_jwt_token');
         return false;
       } else {
-        // Handle simple token (base64 encoded username:timestamp)
-        try {
-          const tokenData = atob(token);
-          const [, timestamp] = tokenData.split(':');
-          const tokenAge = Date.now() - parseInt(timestamp);
-          const twentyFourHours = 24 * 60 * 60 * 1000;
-          
-          if (tokenAge > twentyFourHours) {
-            localStorage.removeItem('wc_jwt_token');
-            return false;
-          }
-          
-          return true;
-        } catch (error) {
-          localStorage.removeItem('wc_jwt_token');
-          return false;
-        }
+        // If token doesn't have JWT format, it's invalid
+        localStorage.removeItem('wc_jwt_token');
+        return false;
       }
     } catch (error) {
       logger.error('Token validation error:', error);
