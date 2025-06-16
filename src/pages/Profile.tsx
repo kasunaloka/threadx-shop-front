@@ -3,13 +3,13 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useAuth } from '../context/AuthContext';
+import { useUnifiedAuth } from '../context/UnifiedAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
 import { User, Mail } from 'lucide-react';
 
 const Profile = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user } = useUnifiedAuth();
 
   // Show authentication message if not logged in
   if (!isAuthenticated) {
@@ -70,9 +70,7 @@ const Profile = () => {
                     {user?.displayName || user?.username}
                   </h3>
                   <p className="text-gray-600">{user?.email}</p>
-                  {user?.customerId && (
-                    <p className="text-sm text-gray-500">Customer ID: {user.customerId}</p>
-                  )}
+                  <p className="text-sm text-gray-500">Source: {user?.source}</p>
                 </div>
               </div>
 
