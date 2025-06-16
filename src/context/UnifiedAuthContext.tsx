@@ -1,191 +1,386 @@
-
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { User, AuthState, LoginCredentials, RegisterData } from '../types/auth';
-import { WordPressAuthService } from '../services/wordpressAuth';
-import { SupabaseAuthService } from '../services/supabaseAuth';
+import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import { wooCommerceApi } from '../utils/woocommerceApi';
+import { supabase } from '../lib/supabase';
+import { AuthSyncService } from '../utils/authSync';
 import { toast } from 'sonner';
+import { logger } from '../utils/logger';
 
-interface UnifiedAuthContextType extends AuthState {
-  login: (credentials: LoginCredentials, provider?: 'wordpress' | 'supabase') => Promise<boolean>;
-  register: (data: RegisterData, provider?: 'wordpress' | 'supabase') => Promise<boolean>;
-  logout: () => Promise<void>;
-  resetPassword: (email: string, provider?: 'wordpress' | 'supabase') => Promise<void>;
+interface User {
+  id?: number;
+  email: string;
+  username: string;
+  displayName: string;
+  customerId?: number;
+  supabaseId?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
-const UnifiedAuthContext = createContext<UnifiedAuthContextType | undefined>(undefined);
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  authProvider: 'wordpress' | 'supabase' | null;
+}
 
 type AuthAction =
-  | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_USER'; payload: User | null }
-  | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'CLEAR_ERROR' };
+  | { type: 'LOGIN_START' }
+  | { type: 'LOGIN_SUCCESS'; payload: { user: User; provider: 'wordpress' | 'supabase' } }
+  | { type: 'LOGIN_FAILURE' }
+  | { type: 'LOGOUT' }
+  | { type: 'SET_LOADING'; payload: boolean };
+
+interface AuthContextType extends AuthState {
+  login: (username: string, password: string, provider?: 'wordpress' | 'supabase') => Promise<boolean>;
+  register: (userData: {
+    username: string;
+    email: string;
+    password: string;
+    firstName?: string;
+    lastName?: string;
+  }, provider?: 'wordpress' | 'supabase') => Promise<boolean>;
+  logout: () => void;
+  resetPassword: (email: string) => Promise<boolean>;
+  syncUserData: (user: User, provider: 'wordpress' | 'supabase') => Promise<void>;
+}
+
+const UnifiedAuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const authReducer = (state: AuthState, action: AuthAction): AuthState => {
   switch (action.type) {
-    case 'SET_LOADING':
-      return { ...state, isLoading: action.payload };
-    case 'SET_USER':
+    case 'LOGIN_START':
       return {
         ...state,
-        user: action.payload,
-        isAuthenticated: !!action.payload,
-        error: null,
+        isLoading: true,
       };
-    case 'SET_ERROR':
-      return { ...state, error: action.payload, isLoading: false };
-    case 'CLEAR_ERROR':
-      return { ...state, error: null };
+    case 'LOGIN_SUCCESS':
+      return {
+        ...state,
+        user: action.payload.user,
+        authProvider: action.payload.provider,
+        isAuthenticated: true,
+        isLoading: false,
+      };
+    case 'LOGIN_FAILURE':
+      return {
+        ...state,
+        user: null,
+        authProvider: null,
+        isAuthenticated: false,
+        isLoading: false,
+      };
+    case 'LOGOUT':
+      return {
+        ...state,
+        user: null,
+        authProvider: null,
+        isAuthenticated: false,
+        isLoading: false,
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        isLoading: action.payload,
+      };
     default:
       return state;
   }
 };
 
-const initialState: AuthState = {
-  user: null,
-  isAuthenticated: false,
-  isLoading: true,
-  error: null,
-};
+export const UnifiedAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [state, dispatch] = useReducer(authReducer, {
+    user: null,
+    isAuthenticated: false,
+    isLoading: true,
+    authProvider: null,
+  });
 
-export const UnifiedAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(authReducer, initialState);
-  const wordpressService = new WordPressAuthService();
-  const supabaseService = new SupabaseAuthService();
+  // Sync user data between WordPress and Supabase using the new service
+  const syncUserData = async (user: User, provider: 'wordpress' | 'supabase') => {
+    try {
+      logger.log('UnifiedAuth: Syncing user data between platforms:', { user, provider });
 
-  useEffect(() => {
-    // Set up Supabase auth state listener
-    const { data: { subscription } } = supabaseService.onAuthStateChange((user) => {
-      if (user) {
-        dispatch({ type: 'SET_USER', payload: user });
+      if (provider === 'wordpress') {
+        await AuthSyncService.syncWordPressToSupabase(user);
+      } else if (provider === 'supabase') {
+        await AuthSyncService.syncSupabaseToWordPress(user);
       }
-      dispatch({ type: 'SET_LOADING', payload: false });
-    });
-
-    // Check for existing WordPress token
-    const wpToken = wordpressService.getStoredToken();
-    if (wpToken && !state.user) {
-      // In a real app, you'd validate the token with WordPress
-      console.log('WordPress token found, but validation not implemented');
+    } catch (error) {
+      logger.error('UnifiedAuth: Failed to sync user data:', error);
+      // Don't throw error to avoid blocking login
     }
+  };
+
+  // Check for existing authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        // Check Supabase first
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const userData = {
+            supabaseId: session.user.id,
+            email: session.user.email || '',
+            username: session.user.email?.split('@')[0] || '',
+            displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || '',
+            firstName: session.user.user_metadata?.first_name,
+            lastName: session.user.user_metadata?.last_name,
+          };
+          
+          // Get unified profile data
+          const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+          const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+          
+          logger.log('UnifiedAuth: Restored Supabase user from session:', finalUserData);
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
+          return;
+        }
+
+        // Check WordPress token
+        const isValidWP = await wooCommerceApi.validateToken();
+        if (isValidWP) {
+          const storedUser = localStorage.getItem('wc_user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            
+            // Get unified profile data
+            const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+            const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+            
+            logger.log('UnifiedAuth: Restored WordPress user from storage:', finalUserData);
+            dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'wordpress' } });
+            return;
+          }
+        }
+
+        dispatch({ type: 'LOGIN_FAILURE' });
+      } catch (error) {
+        logger.error('Auth check failed:', error);
+        dispatch({ type: 'LOGIN_FAILURE' });
+      }
+    };
+
+    checkAuth();
+
+    // Set up Supabase auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user) {
+          const userData = {
+            supabaseId: session.user.id,
+            email: session.user.email || '',
+            username: session.user.email?.split('@')[0] || '',
+            displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || '',
+            firstName: session.user.user_metadata?.first_name,
+            lastName: session.user.user_metadata?.last_name,
+          };
+          
+          // Sync data and get unified profile
+          await syncUserData(userData, 'supabase');
+          const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+          const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+          
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
+        } else if (event === 'SIGNED_OUT') {
+          // Only logout if currently using Supabase auth
+          if (state.authProvider === 'supabase') {
+            dispatch({ type: 'LOGOUT' });
+          }
+        }
+      }
+    );
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (credentials: LoginCredentials, provider: 'wordpress' | 'supabase' = 'supabase'): Promise<boolean> => {
+  const login = async (username: string, password: string, provider: 'wordpress' | 'supabase' = 'wordpress'): Promise<boolean> => {
+    dispatch({ type: 'LOGIN_START' });
+    
     try {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      dispatch({ type: 'CLEAR_ERROR' });
+      if (provider === 'supabase') {
+        logger.log('UnifiedAuth: Starting Supabase login for:', username);
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: username,
+          password: password,
+        });
 
-      let user: User | null = null;
+        if (error) throw error;
 
-      if (provider === 'wordpress') {
-        const result = await wordpressService.login(credentials);
-        user = result?.user || null;
+        const userData = {
+          supabaseId: data.user.id,
+          email: data.user.email || username,
+          username: data.user.email?.split('@')[0] || username,
+          displayName: data.user.user_metadata?.display_name || data.user.email?.split('@')[0] || username,
+          firstName: data.user.user_metadata?.first_name,
+          lastName: data.user.user_metadata?.last_name,
+        };
+
+        // Sync user data and get unified profile
+        await syncUserData(userData, 'supabase');
+        const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+        const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+        
+        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'supabase' } });
+        toast.success(`Welcome back, ${finalUserData.displayName}!`);
+        return true;
       } else {
-        user = await supabaseService.login(credentials);
-      }
-
-      if (user) {
-        dispatch({ type: 'SET_USER', payload: user });
-        toast.success('Successfully logged in!');
+        // WordPress login
+        logger.log('UnifiedAuth: Starting WordPress login for:', username);
+        const { user, customerId } = await wooCommerceApi.login(username, password);
+        
+        const userData = {
+          id: user.id,
+          email: user.email || username,
+          username: user.username || username,
+          displayName: user.displayName || user.username || username,
+          customerId: customerId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        };
+        
+        // Sync user data and get unified profile
+        await syncUserData(userData, 'wordpress');
+        const unifiedProfile = await AuthSyncService.getUnifiedProfile(userData.email);
+        const finalUserData = unifiedProfile ? { ...userData, ...unifiedProfile } : userData;
+        
+        localStorage.setItem('wc_user', JSON.stringify(finalUserData));
+        dispatch({ type: 'LOGIN_SUCCESS', payload: { user: finalUserData, provider: 'wordpress' } });
+        toast.success(`Welcome back, ${finalUserData.displayName}!`);
         return true;
       }
+    } catch (error: any) {
+      logger.error('UnifiedAuth: Login failed:', error);
+      dispatch({ type: 'LOGIN_FAILURE' });
       
-      throw new Error('Login failed');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Login failed';
-      dispatch({ type: 'SET_ERROR', payload: message });
-      toast.error(message);
+      const errorMessage = error.message || 'Login failed. Please check your credentials.';
+      toast.error(errorMessage);
       return false;
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
-  const register = async (data: RegisterData, provider: 'wordpress' | 'supabase' = 'supabase'): Promise<boolean> => {
+  const register = async (userData: {
+    username: string;
+    email: string;
+    password: string;
+    firstName?: string;
+    lastName?: string;
+  }, provider: 'wordpress' | 'supabase' = 'wordpress'): Promise<boolean> => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
     try {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      dispatch({ type: 'CLEAR_ERROR' });
+      if (provider === 'supabase') {
+        logger.log('UnifiedAuth: Starting Supabase registration...');
+        
+        const { error } = await supabase.auth.signUp({
+          email: userData.email,
+          password: userData.password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/`,
+            data: {
+              username: userData.username,
+              display_name: userData.firstName && userData.lastName 
+                ? `${userData.firstName} ${userData.lastName}` 
+                : userData.username,
+              first_name: userData.firstName,
+              last_name: userData.lastName,
+            }
+          }
+        });
 
-      let user: User;
+        if (error) throw error;
 
-      if (provider === 'wordpress') {
-        user = await wordpressService.register(data);
+        dispatch({ type: 'SET_LOADING', payload: false });
+        toast.success('Registration successful! Please check your email to verify your account.');
+        return true;
       } else {
-        user = await supabaseService.register(data);
+        // WordPress registration
+        logger.log('UnifiedAuth: Starting WordPress registration...');
+        
+        await wooCommerceApi.register({
+          username: userData.username,
+          email: userData.email,
+          password: userData.password,
+          first_name: userData.firstName,
+          last_name: userData.lastName,
+        });
+        
+        dispatch({ type: 'SET_LOADING', payload: false });
+        toast.success('Registration successful! You can now log in with your username and password.');
+        return true;
+      }
+    } catch (error: any) {
+      logger.error('UnifiedAuth: Registration failed:', error);
+      dispatch({ type: 'SET_LOADING', payload: false });
+      
+      let errorMessage = 'Registration failed. Please try again.';
+      
+      if (error.message.includes('email already exists') || error.message.includes('User already registered')) {
+        errorMessage = 'This email is already registered. Please use a different email or sign in to your existing account.';
+      } else if (error.message.includes('username is already taken')) {
+        errorMessage = 'This username is already taken. Please choose a different username.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast.error(errorMessage);
+      return false;
+    }
+  };
+
+  const resetPassword = async (email: string): Promise<boolean> => {
+    try {
+      logger.log('UnifiedAuth: Starting password reset for:', email);
+      
+      // Try Supabase password reset first
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (!error) {
+        toast.success('Password reset email sent! Please check your inbox.');
+        return true;
       }
 
-      dispatch({ type: 'SET_USER', payload: user });
-      toast.success('Registration successful!');
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Registration failed';
-      dispatch({ type: 'SET_ERROR', payload: message });
-      toast.error(message);
-      return false;
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
-    }
-  };
-
-  const logout = async (): Promise<void> => {
-    try {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      
-      // Logout from both services
-      await supabaseService.logout();
-      wordpressService.logout();
-      
-      dispatch({ type: 'SET_USER', payload: null });
-      toast.success('Successfully logged out');
-    } catch (error) {
-      console.error('Logout error:', error);
-      toast.error('Logout failed');
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
-    }
-  };
-
-  const resetPassword = async (email: string, provider: 'wordpress' | 'supabase' = 'supabase'): Promise<void> => {
-    try {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      dispatch({ type: 'CLEAR_ERROR' });
-
-      if (provider === 'wordpress') {
-        await wordpressService.resetPassword(email);
-      } else {
-        await supabaseService.resetPassword(email);
-      }
-
-      toast.success('Password reset email sent!');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Password reset failed';
-      dispatch({ type: 'SET_ERROR', payload: message });
-      toast.error(message);
+      // If Supabase fails, could implement WordPress password reset here
+      // For now, we'll just show the Supabase error
       throw error;
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+    } catch (error: any) {
+      logger.error('UnifiedAuth: Password reset failed:', error);
+      toast.error('Failed to send password reset email. Please try again.');
+      return false;
     }
   };
 
-  const value: UnifiedAuthContextType = {
-    ...state,
-    login,
-    register,
-    logout,
-    resetPassword,
+  const logout = () => {
+    if (state.authProvider === 'supabase') {
+      supabase.auth.signOut();
+    } else if (state.authProvider === 'wordpress') {
+      wooCommerceApi.logout();
+      localStorage.removeItem('wc_user');
+    }
+    dispatch({ type: 'LOGOUT' });
+    toast.success('Logged out successfully!');
   };
 
   return (
-    <UnifiedAuthContext.Provider value={value}>
+    <UnifiedAuthContext.Provider
+      value={{
+        ...state,
+        login,
+        register,
+        logout,
+        resetPassword,
+        syncUserData,
+      }}
+    >
       {children}
     </UnifiedAuthContext.Provider>
   );
 };
 
-export const useUnifiedAuth = (): UnifiedAuthContextType => {
+export const useUnifiedAuth = (): AuthContextType => {
   const context = useContext(UnifiedAuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useUnifiedAuth must be used within a UnifiedAuthProvider');
   }
   return context;

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingCart, User, LogOut, Menu, X, ChevronDown, Package } from 'lucide-react';
@@ -23,8 +22,8 @@ const Navbar = () => {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     setIsMenuOpen(false);
   };
 

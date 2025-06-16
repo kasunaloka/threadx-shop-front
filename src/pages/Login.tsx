@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { useUnifiedAuth } from '../context/UnifiedAuthContext';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -12,7 +12,7 @@ const Login = () => {
     password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
-  const { login, isLoading } = useUnifiedAuth();
+  const { login, isLoading } = useAuth();
   const navigate = useNavigate();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,11 +29,7 @@ const Login = () => {
       return;
     }
 
-    const success = await login({
-      username: formData.username,
-      password: formData.password,
-    });
-    
+    const success = await login(formData.username, formData.password);
     if (success) {
       navigate('/');
     }
