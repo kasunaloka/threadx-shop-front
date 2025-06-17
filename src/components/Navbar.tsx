@@ -1,32 +1,17 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, LogOut, Menu, X, ChevronDown, Package } from 'lucide-react';
+import { ShoppingCart, Menu, X } from 'lucide-react';
 import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../components/ui/dropdown-menu';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { cartItems } = useCart();
-  const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
 
   const cartItemsCount = cartItems.reduce((total, item) => total + item.quantity, 0);
 
   const isActive = (path: string) => location.pathname === path;
-
-  const handleLogout = () => {
-    logout();
-    setIsMenuOpen(false);
-  };
 
   return (
     <nav className="bg-white shadow-lg border-b border-gray-100 sticky top-0 z-50">
@@ -60,68 +45,9 @@ const Navbar = () => {
               Products
             </Link>
             
-            {/* Authentication Section */}
-            {isAuthenticated ? (
-              <div className="flex items-center space-x-4">
-                <Link 
-                  to="/orders" 
-                  className={`font-medium transition-colors px-3 py-2 rounded-md ${
-                    isActive('/orders') 
-                      ? 'text-blue-600 bg-blue-50' 
-                      : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
-                  }`}
-                >
-                  Orders
-                </Link>
-                
-                {/* Account Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center space-x-2 px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                    <User size={16} className="text-gray-600" />
-                    <span className="text-sm text-gray-700 font-medium">
-                      {user?.displayName || user?.username || 'User'}
-                    </span>
-                    <ChevronDown size={14} className="text-gray-500" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56 bg-white border border-gray-200 shadow-lg">
-                    <DropdownMenuLabel className="px-2 py-1.5 text-sm font-semibold text-gray-900">
-                      My Account
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <Link to="/profile" className="flex items-center">
-                        <User className="mr-2 h-4 w-4" />
-                        Profile
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
-                      <Link to="/orders" className="flex items-center">
-                        <Package className="mr-2 h-4 w-4" />
-                        Orders
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={handleLogout}
-                      className="px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 cursor-pointer"
-                    >
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Logout
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ) : (
-              <Link 
-                to="/login" 
-                className={`font-medium transition-colors px-4 py-2 rounded-md border ${
-                  isActive('/login') 
-                    ? 'text-blue-600 border-blue-600 bg-blue-50' 
-                    : 'text-gray-700 border-gray-300 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50'
-                }`}
-              >
-                Login
-              </Link>
-            )}
+            {/* Cart Section */}
+            <div className="flex items-center space-x-4">
+            </div>
             
             <Link 
               to="/cart" 
@@ -172,46 +98,7 @@ const Navbar = () => {
                 Products
               </Link>
               
-              {isAuthenticated ? (
-                <>
-                  <Link 
-                    to="/orders" 
-                    className={`font-medium px-3 py-2 rounded-md transition-colors ${
-                      isActive('/orders') 
-                        ? 'text-blue-600 bg-blue-50' 
-                        : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
-                    }`}
-                    onClick={() => setIsMenuOpen(false)}
-                  >
-                    Orders
-                  </Link>
-                  <div className="flex items-center space-x-2 text-gray-700 px-3 py-2 bg-gray-50 rounded-md mx-0">
-                    <User size={16} />
-                    <span className="text-sm font-medium">
-                      {user?.displayName || user?.username || 'User'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="flex items-center space-x-2 text-gray-700 hover:text-red-600 font-medium px-3 py-2 rounded-md hover:bg-red-50 transition-colors text-left"
-                  >
-                    <LogOut size={16} />
-                    <span>Logout</span>
-                  </button>
-                </>
-              ) : (
-                <Link 
-                  to="/login" 
-                  className={`font-medium px-3 py-2 rounded-md border transition-colors ${
-                    isActive('/login') 
-                      ? 'text-blue-600 border-blue-600 bg-blue-50' 
-                      : 'text-gray-700 border-gray-300 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50'
-                  }`}
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  Login
-                </Link>
-              )}
+
               
               <Link 
                 to="/cart" 
