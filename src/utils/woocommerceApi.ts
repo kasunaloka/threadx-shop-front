@@ -6,6 +6,7 @@ interface WooCommerceConfig {
   baseURL: string;
   consumerKey: string;
   consumerSecret: string;
+  jwtURL?: string;
 }
 
 // Product interfaces based on WooCommerce API
@@ -108,10 +109,29 @@ class WooCommerceAPI {
       timeout: 30000,
     });
 
+    // Add request interceptor for JWT token
+    this.api.interceptors.request.use(
+      (config) => {
+        const token = localStorage.getItem('wc_jwt_token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+          logger.log('Added JWT token to request');
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
     // Add response interceptor for error handling
     this.api.interceptors.response.use(
       (response) => response,
       (error) => {
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          // Clear invalid token
+          localStorage.removeItem('wc_jwt_token');
+          localStorage.removeItem('wc_user');
+          logger.error('Authentication failed, clearing tokens');
+        }
         logger.error('WooCommerce API Error:', error.response?.data || error.message);
         return Promise.reject(error);
       }
@@ -213,9 +233,9 @@ class WooCommerceAPI {
           key: `local_${item.id}_${index}`,
           id: item.id,
           quantity: item.quantity,
-          name: `Product ${item.id}`,
+          name: `Product ${item.id}`, // Will be populated by the frontend
           prices: {
-            price: 0,
+            price: 0, // Will be populated by the frontend
           },
           variation: item.variation || {},
           images: [],
@@ -378,7 +398,7 @@ class WooCommerceAPI {
     }
   }
 
-  // Orders with enhanced customer ID/username matching
+  // Orders
   async getOrders(params?: {
     customer?: number;
     status?: string;
@@ -397,7 +417,6 @@ class WooCommerceAPI {
         const userData = JSON.parse(storedUser);
         logger.log('📱 User data from storage:', userData);
         
-        // Use customer ID if available
         if (userData.customerId && !finalParams.customer) {
           finalParams.customer = userData.customerId;
           logger.log('👤 Using customer ID:', userData.customerId);
@@ -423,12 +442,12 @@ class WooCommerceAPI {
       
       let orders = response.data || [];
       
-      // Enhanced filtering logic using customer ID and username
+      // If no orders found with customer filter, try without customer filter
       if (orders.length === 0 && finalParams.customer) {
         logger.log('🔄 No orders found with customer ID, trying general fetch');
         
         const fallbackParams = {
-          per_page: 100,
+          per_page: 100, // Increased to get more orders
           orderby: 'date',
           order: 'desc'
         };
@@ -445,41 +464,26 @@ class WooCommerceAPI {
         
         const allOrders = fallbackResponse.data || [];
         
+        // Filter by email and customer ID if we have orders
         if (allOrders.length > 0 && storedUser) {
           const userData = JSON.parse(storedUser);
           logger.log('📧 Filtering orders by user data:', userData);
           
           orders = allOrders.filter(order => {
-            // Match by customer ID (primary)
-            const matchesCustomerId = order.customer_id === userData.customerId;
-            
-            // Match by username in billing info (secondary)
-            const matchesUsername = order.billing?.first_name?.toLowerCase() === userData.username?.toLowerCase() ||
-                                   order.billing?.last_name?.toLowerCase() === userData.username?.toLowerCase();
-            
-            // Match by display name (tertiary)
-            const matchesDisplayName = userData.displayName && (
-              order.billing?.first_name?.toLowerCase().includes(userData.displayName.toLowerCase()) ||
-              order.billing?.last_name?.toLowerCase().includes(userData.displayName.toLowerCase())
-            );
-            
-            // Keep email as fallback
             const matchesEmail = order.billing?.email === userData.email;
+            const matchesCustomerId = order.customer_id === userData.customerId;
             
             logger.log('🔍 Order check:', {
               orderId: order.id,
+              orderEmail: order.billing?.email,
               orderCustomerId: order.customer_id,
-              orderBilling: order.billing,
+              userEmail: userData.email,
               userCustomerId: userData.customerId,
-              userUsername: userData.username,
-              userDisplayName: userData.displayName,
-              matchesCustomerId,
-              matchesUsername,
-              matchesDisplayName,
-              matchesEmail
+              matchesEmail,
+              matchesCustomerId
             });
             
-            return matchesCustomerId || matchesUsername || matchesDisplayName || matchesEmail;
+            return matchesEmail || matchesCustomerId;
           });
           
           logger.log('📦 Filtered orders result:', orders.length, 'orders');
@@ -493,6 +497,7 @@ class WooCommerceAPI {
     } catch (error: any) {
       logger.error('❌ Orders fetch failed:', error);
       
+      // Try one more time without any filters if we get authentication errors
       if (error.response?.status === 401 || error.response?.status === 403) {
         logger.log('🔄 Authentication error, trying basic fetch...');
         try {
@@ -536,193 +541,172 @@ class WooCommerceAPI {
     }
   }
 
-
-
-  // Authentication with improved error handling and fallback
+  // Authentication with improved JWT handling
   async login(username: string, password: string): Promise<{ token: string; user: any; customerId?: number }> {
     try {
       logger.log('🔐 Attempting login with username:', username);
       
-      // Validate input parameters
-      if (!username || !password) {
-        throw new Error('Username and password are required');
-      }
-
-      // Try multiple JWT endpoints
+      // Try multiple JWT endpoint variations
       const possibleJwtUrls = [
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/jwt-auth/v1/token`,
-        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
         `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/wp/v2/jwt-auth/v1/token`,
+        `${this.config.baseURL.replace('/wp-json/wc/v3', '')}/wp-json/simple-jwt-login/v1/auth`,
       ];
 
       let loginResponse;
-      let authError;
+      let jwtUrl;
 
-      // Try JWT authentication first
-      for (const jwtUrl of possibleJwtUrls) {
+      for (const url of possibleJwtUrls) {
         try {
-          logger.log('🌐 Trying JWT URL:', jwtUrl);
-          
-          loginResponse = await axios.post(jwtUrl, {
+          logger.log('🌐 Trying JWT URL:', url);
+          loginResponse = await axios.post(url, {
             username,
             password,
           }, {
             timeout: 10000,
-            headers: {
-              'Content-Type': 'application/json',
-            }
           });
-
-          if (loginResponse?.data?.token) {
-            logger.log('✅ JWT authentication successful');
-            break;
-          }
+          jwtUrl = url;
+          logger.log('✅ JWT Login successful with URL:', url);
+          break;
         } catch (error: any) {
-          logger.log('❌ JWT URL failed:', jwtUrl, error.response?.status, error.response?.data);
-          authError = error;
+          logger.log('❌ JWT URL failed:', url, error.response?.status);
           continue;
         }
       }
 
-      // If JWT fails, try WooCommerce customer authentication as fallback
-      if (!loginResponse?.data?.token) {
-        logger.log('🔄 JWT failed, trying WooCommerce customer authentication...');
+      if (!loginResponse) {
+        // Fallback to basic auth if JWT is not available
+        logger.log('🔄 JWT not available, trying basic auth fallback');
         
         try {
-          // Search by username first, then by email
-          let customer = null;
-          
-          // Try username search first
-          const usernameSearchResponse = await this.api.get('/customers', {
+          // Try to authenticate with WooCommerce customer endpoint
+          const customerResponse = await this.api.get('/customers', {
             params: {
+              email: username,
               search: username,
-              per_page: 10
             }
           });
 
-          logger.log('👥 Username search response:', usernameSearchResponse.data);
-          
-          if (usernameSearchResponse.data && usernameSearchResponse.data.length > 0) {
-            // Find exact match by username
-            customer = usernameSearchResponse.data.find((c: any) => 
-              c.username === username
-            );
-          }
-
-          // If not found by username, try email search
-          if (!customer) {
-            const emailSearchResponse = await this.api.get('/customers', {
-              params: {
-                email: username
-              }
-            });
+          if (customerResponse.data && customerResponse.data.length > 0) {
+            const customer = customerResponse.data[0];
             
-            if (emailSearchResponse.data && emailSearchResponse.data.length > 0) {
-              customer = emailSearchResponse.data[0];
-            }
-          }
-
-          if (customer) {
-            logger.log('✅ Customer found:', customer.id, customer.email, customer.username);
-            
-            // Create a mock token for the session
-            const mockToken = btoa(JSON.stringify({
-              user_id: customer.id,
-              user_email: customer.email,
-              user_login: customer.username || customer.email,
-              timestamp: Date.now()
-            }));
-            
-            localStorage.setItem('wc_jwt_token', mockToken);
+            // Create a simple token for session management
+            const simpleToken = btoa(`${username}:${Date.now()}`);
+            localStorage.setItem('wc_jwt_token', simpleToken);
             
             const userData = {
-              id: customer.id,
               email: customer.email,
-              username: customer.username || customer.email,
-              displayName: `${customer.first_name} ${customer.last_name}`.trim() || customer.username || customer.email
+              username: customer.username || username,
+              displayName: customer.first_name ? `${customer.first_name} ${customer.last_name}`.trim() : username,
             };
             
-            logger.log('✅ WooCommerce authentication successful:', { userData, customerId: customer.id });
+            logger.log('✅ Basic auth login successful');
             
             return {
-              token: mockToken,
+              token: simpleToken,
               user: userData,
               customerId: customer.id
             };
           } else {
-            logger.log('❌ Customer not found');
-            throw new Error('Invalid username or password');
+            throw new Error('Customer not found');
           }
-          
-        } catch (customerError: any) {
-          logger.error('❌ Customer authentication also failed:', customerError);
-          throw new Error('Invalid username or password');
+        } catch (basicAuthError) {
+          logger.error('❌ Basic auth fallback failed:', basicAuthError);
+          throw new Error('Invalid username or password. Please check your credentials.');
         }
       }
 
-      // Handle JWT success
-      if (loginResponse?.data?.token) {
-        const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
-        
-        localStorage.setItem('wc_jwt_token', token);
-        
-        // Try to get customer ID
-        let customerId;
-        try {
-          const customerResponse = await this.api.get('/customers', {
-            params: {
-              email: user_email
-            }
-          });
-          
-          if (customerResponse.data && customerResponse.data.length > 0) {
-            customerId = customerResponse.data[0].id;
-          }
-        } catch (error) {
-          logger.log('Could not fetch customer ID:', error);
-        }
-        
-        const userData = {
-          email: user_email,
-          username: user_nicename,
-          displayName: user_display_name || user_nicename
-        };
-        
-        logger.log('✅ JWT Login successful:', { userData, customerId });
-        
-        return {
-          token,
-          user: userData,
-          customerId
-        };
-      }
-
-      throw new Error('Authentication failed');
+      const { token, user_email, user_nicename, user_display_name } = loginResponse.data;
+      localStorage.setItem('wc_jwt_token', token);
       
+      let customerId;
+      try {
+        logger.log('🔍 Looking for customer with email:', user_email);
+        const customerResponse = await this.api.get('/customers', {
+          params: {
+            email: user_email,
+          }
+        });
+        
+        logger.log('👥 Customer search response:', customerResponse.data);
+        
+        if (customerResponse.data && customerResponse.data.length > 0) {
+          customerId = customerResponse.data[0].id;
+          logger.log('✅ Found customer ID:', customerId);
+        }
+      } catch (customerError) {
+        logger.log('⚠️ Could not fetch customer ID:', customerError);
+      }
+      
+      const userData = {
+        email: user_email,
+        username: user_nicename,
+        displayName: user_display_name,
+      };
+      
+      logger.log('✅ Final login data:', { userData, customerId });
+      
+      return {
+        token,
+        user: userData,
+        customerId
+      };
     } catch (error: any) {
       logger.error('❌ Login error:', error.response?.data || error.message);
       
-      // Clear any stored tokens on error
-      localStorage.removeItem('wc_jwt_token');
-      localStorage.removeItem('wc_user');
-      
-      if (error.message === 'Username and password are required') {
-        throw error;
-      }
-      
-      if (error.message === 'Invalid username or password') {
-        throw error;
-      }
-      
-      if (error.response?.status === 403 || error.response?.status === 401) {
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      } else if (error.response?.status === 403) {
+        throw new Error('Invalid username or password');
+      } else if (error.response?.status === 404) {
         throw new Error('Authentication service not available. Please contact support.');
       }
       
-      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        throw new Error('Login failed. Please check your credentials and try again.');
+      throw new Error('Login failed. Please check your credentials.');
+    }
+  }
+
+  async register(userData: {
+    username: string;
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+  }): Promise<any> {
+    try {
+      logger.log('Attempting registration with data:', userData);
+      
+      const response = await this.api.post('/customers', {
+        username: userData.username,
+        email: userData.email,
+        password: userData.password,
+        first_name: userData.first_name || '',
+        last_name: userData.last_name || '',
+        billing: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          email: userData.email,
+        },
+        shipping: {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+        }
+      });
+      
+      logger.log('Registration successful:', response.data);
+      return response.data;
+    } catch (error: any) {
+      logger.error('Registration error details:', error.response?.data || error.message);
+      
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      } else if (error.response?.data?.code === 'registration-error-email-exists') {
+        throw new Error('An account with this email already exists.');
+      } else if (error.response?.data?.code === 'registration-error-username-exists') {
+        throw new Error('This username is already taken.');
       }
       
-      throw new Error('Login failed. Please try again.');
+      throw new Error('Registration failed. Please check your information and try again.');
     }
   }
 
@@ -757,9 +741,23 @@ class WooCommerceAPI {
         localStorage.removeItem('wc_jwt_token');
         return false;
       } else {
-        // If token doesn't have JWT format, it's invalid
-        localStorage.removeItem('wc_jwt_token');
-        return false;
+        // Handle simple token (base64 encoded username:timestamp)
+        try {
+          const tokenData = atob(token);
+          const [, timestamp] = tokenData.split(':');
+          const tokenAge = Date.now() - parseInt(timestamp);
+          const twentyFourHours = 24 * 60 * 60 * 1000;
+          
+          if (tokenAge > twentyFourHours) {
+            localStorage.removeItem('wc_jwt_token');
+            return false;
+          }
+          
+          return true;
+        } catch (error) {
+          localStorage.removeItem('wc_jwt_token');
+          return false;
+        }
       }
     } catch (error) {
       logger.error('Token validation error:', error);

@@ -5,18 +5,18 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useCart } from '../context/CartContext';
 import { wooCommerceApi } from '../utils/woocommerceApi';
-
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 
 const Checkout = () => {
   const { cartItems, getCartTotal, clearCart } = useCart();
-
+  const { user } = useAuth();
   const navigate = useNavigate();
   
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    email: '',
+    email: user?.email || '',
     phone: '',
     address: '',
     city: '',
@@ -41,12 +41,10 @@ const Checkout = () => {
 
   // Update email when user changes
   useEffect(() => {
-    // Import and use auth context or remove this check if not needed
-    if (false) {
-      // Removed user reference since it's not defined
-      setFormData(prev => ({ ...prev }));
+    if (user?.email) {
+      setFormData(prev => ({ ...prev, email: user.email }));
     }
-  }, []); // Remove dependency since user is not defined
+  }, [user?.email]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({

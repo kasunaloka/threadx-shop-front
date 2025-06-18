@@ -1,182 +1,210 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
-  User, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  GoogleAuthProvider,
-  signInWithPopup,
-  sendPasswordResetEmail,
-  updateProfile as firebaseUpdateProfile,
-  updateEmail as firebaseUpdateEmail,
-  updatePassword as firebaseUpdatePassword,
-  reauthenticateWithCredential,
-  EmailAuthProvider,
-  deleteUser as firebaseDeleteUser
-} from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import { wooCommerceApi } from '../utils/woocommerceApi';
+import { toast } from 'sonner';
+import { logger } from '../utils/logger';
 
-interface AuthContextType {
-  currentUser: User | null;
-  loading: boolean;
-  signUp: (email: string, password: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-  updateProfile: (displayName: string) => Promise<void>;
-  updateEmail: (email: string, password: string) => Promise<void>;
-  updatePassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  deleteAccount: (password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  getIdToken: () => Promise<string | null>;
+interface User {
+  id?: number;
+  email: string;
+  username: string;
+  displayName: string;
+  customerId?: number;
+}
+
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+
+type AuthAction =
+  | { type: 'LOGIN_START' }
+  | { type: 'LOGIN_SUCCESS'; payload: User }
+  | { type: 'LOGIN_FAILURE' }
+  | { type: 'LOGOUT' }
+  | { type: 'SET_LOADING'; payload: boolean };
+
+interface AuthContextType extends AuthState {
+  login: (username: string, password: string) => Promise<boolean>;
+  register: (userData: {
+    username: string;
+    email: string;
+    password: string;
+    firstName?: string;
+    lastName?: string;
+  }) => Promise<boolean>;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+const authReducer = (state: AuthState, action: AuthAction): AuthState => {
+  switch (action.type) {
+    case 'LOGIN_START':
+      return {
+        ...state,
+        isLoading: true,
+      };
+    case 'LOGIN_SUCCESS':
+      return {
+        ...state,
+        user: action.payload,
+        isAuthenticated: true,
+        isLoading: false,
+      };
+    case 'LOGIN_FAILURE':
+      return {
+        ...state,
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+      };
+    case 'LOGOUT':
+      return {
+        ...state,
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        isLoading: action.payload,
+      };
+    default:
+      return state;
   }
-  return context;
-}
+};
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [state, dispatch] = useReducer(authReducer, {
+    user: null,
+    isAuthenticated: false,
+    isLoading: true,
+  });
 
-  function signUp(email: string, password: string) {
-    return createUserWithEmailAndPassword(auth, email, password);
-  }
-
-  function signIn(email: string, password: string) {
-    return signInWithEmailAndPassword(auth, email, password);
-  }
-
-  function signInWithGoogle() {
-    const provider = new GoogleAuthProvider();
-    return signInWithPopup(auth, provider);
-  }
-
-  function resetPassword(email: string) {
-    return sendPasswordResetEmail(auth, email);
-  }
-
-  async function updateProfile(displayName: string) {
-    if (!currentUser) throw new Error('No user logged in');
-    return firebaseUpdateProfile(currentUser, { displayName });
-  }
-
-  async function updateEmail(email: string, password: string) {
-    if (!currentUser) throw new Error('No user logged in');
-    if (!currentUser.email) throw new Error('Current user has no email');
-    
-    const credential = EmailAuthProvider.credential(currentUser.email, password);
-    await reauthenticateWithCredential(currentUser, credential);
-    return firebaseUpdateEmail(currentUser, email);
-  }
-
-  async function updatePassword(currentPassword: string, newPassword: string) {
-    if (!currentUser) throw new Error('No user logged in');
-    if (!currentUser.email) throw new Error('Current user has no email');
-    
-    const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
-    await reauthenticateWithCredential(currentUser, credential);
-    return firebaseUpdatePassword(currentUser, newPassword);
-  }
-
-  async function deleteAccount(password: string) {
-    if (!currentUser) throw new Error('No user logged in');
-    if (!currentUser.email) throw new Error('Current user has no email');
-    
-    const credential = EmailAuthProvider.credential(currentUser.email, password);
-    await reauthenticateWithCredential(currentUser, credential);
-    return firebaseDeleteUser(currentUser);
-  }
-
-  function logout() {
-    return signOut(auth);
-  }
-
-  async function getIdToken() {
-    if (currentUser) {
-      return await currentUser.getIdToken();
-    }
-    return null;
-  }
-
+  // Check for existing token on mount
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setLoading(false);
-    });
+    const checkAuth = async () => {
+      try {
+        const isValid = await wooCommerceApi.validateToken();
+        if (isValid) {
+          // Try to get stored user data
+          const storedUser = localStorage.getItem('wc_user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            logger.log('AuthContext: Restored user from storage:', userData);
+            dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+          } else {
+            dispatch({ type: 'LOGIN_FAILURE' });
+          }
+        } else {
+          dispatch({ type: 'LOGIN_FAILURE' });
+        }
+      } catch (error) {
+        logger.error('Auth check failed:', error);
+        dispatch({ type: 'LOGIN_FAILURE' });
+      }
+    };
 
-    return unsubscribe;
+    checkAuth();
   }, []);
 
-  const value = {
-    currentUser,
-    loading,
-    signUp,
-    signIn,
-    signInWithGoogle,
-    resetPassword,
-    updateProfile,
-    updateEmail,
-    updatePassword,
-    deleteAccount,
-    logout,
-    getIdToken
+  const login = async (username: string, password: string): Promise<boolean> => {
+    dispatch({ type: 'LOGIN_START' });
+    
+    try {
+      logger.log('AuthContext: Starting login process for:', username);
+      const { user, customerId } = await wooCommerceApi.login(username, password);
+      logger.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
+      
+      // Ensure we have proper user data
+      const userData = {
+        id: user.id,
+        email: user.email || username, // Fallback to username if email is missing
+        username: user.username || username,
+        displayName: user.displayName || user.username || username,
+        customerId: customerId
+      };
+      
+      logger.log('AuthContext: Final user data:', userData);
+      
+      // Store user data in localStorage
+      localStorage.setItem('wc_user', JSON.stringify(userData));
+      
+      dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+      toast.success('Login successful!');
+      return true;
+    } catch (error: any) {
+      logger.error('AuthContext: Login failed:', error);
+      dispatch({ type: 'LOGIN_FAILURE' });
+      
+      // Show specific error message
+      const errorMessage = error.message || 'Login failed. Please check your credentials.';
+      toast.error(errorMessage);
+      return false;
+    }
+  };
+
+  const register = async (userData: {
+    username: string;
+    email: string;
+    password: string;
+    firstName?: string;
+    lastName?: string;
+  }): Promise<boolean> => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
+    try {
+      logger.log('Starting registration process...');
+      
+      await wooCommerceApi.register({
+        username: userData.username,
+        email: userData.email,
+        password: userData.password,
+        first_name: userData.firstName,
+        last_name: userData.lastName,
+      });
+      
+      dispatch({ type: 'SET_LOADING', payload: false });
+      toast.success('Registration successful! You can now log in.');
+      return true;
+    } catch (error: any) {
+      logger.error('Registration failed:', error);
+      dispatch({ type: 'SET_LOADING', payload: false });
+      
+      // Show the specific error message
+      const errorMessage = error.message || 'Registration failed. Please try again.';
+      toast.error(errorMessage);
+      return false;
+    }
+  };
+
+  const logout = () => {
+    wooCommerceApi.logout();
+    localStorage.removeItem('wc_user');
+    dispatch({ type: 'LOGOUT' });
+    toast.success('Logged out successfully!');
   };
 
   return (
-    <AuthContext.Provider value={{
-      currentUser,
-      loading,
-      signUp: async (email: string, password: string) => {
-        await createUserWithEmailAndPassword(auth, email, password);
-      },
-      signIn: async (email: string, password: string) => {
-        await signInWithEmailAndPassword(auth, email, password);
-      },
-      signInWithGoogle: async () => {
-        await signInWithPopup(auth, new GoogleAuthProvider());
-      },
-      resetPassword: async (email: string) => {
-        await sendPasswordResetEmail(auth, email);
-      },
-      updateProfile: async (displayName: string) => {
-        if (!currentUser) throw new Error('No user logged in');
-        await firebaseUpdateProfile(currentUser, { displayName });
-      },
-      updateEmail: async (email: string, password: string) => {
-        if (!currentUser) throw new Error('No user logged in');
-        if (!currentUser.email) throw new Error('Current user has no email');
-        
-        const credential = EmailAuthProvider.credential(currentUser.email, password);
-        await reauthenticateWithCredential(currentUser, credential);
-        await firebaseUpdateEmail(currentUser, email);
-      },
-      updatePassword: async (currentPassword: string, newPassword: string) => {
-        if (!currentUser) throw new Error('No user logged in');
-        if (!currentUser.email) throw new Error('Current user has no email');
-        
-        const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
-        await reauthenticateWithCredential(currentUser, credential);
-        await firebaseUpdatePassword(currentUser, newPassword);
-      },
-      deleteAccount: async (password: string) => {
-        if (!currentUser) throw new Error('No user logged in');
-        if (!currentUser.email) throw new Error('Current user has no email');
-        
-        const credential = EmailAuthProvider.credential(currentUser.email, password);
-        await reauthenticateWithCredential(currentUser, credential);
-        await firebaseDeleteUser(currentUser);
-      },
-      logout,
-      getIdToken
-    }}>
-      {!loading && children}
+    <AuthContext.Provider
+      value={{
+        ...state,
+        login,
+        register,
+        logout,
+      }}
+    >
+      {children}
     </AuthContext.Provider>
-  );}
+  );
+};
+
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

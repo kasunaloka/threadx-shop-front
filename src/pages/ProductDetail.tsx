@@ -1,11 +1,10 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useProduct } from '../hooks/useProducts';
 import { useCart } from '../context/CartContext';
-import { useProductHistory } from '../context/ProductHistoryContext';
 import { toast } from 'sonner';
 import { Skeleton } from '../components/ui/skeleton';
 
@@ -13,7 +12,6 @@ const ProductDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { addToCart } = useCart();
-  const { addToHistory } = useProductHistory();
   
   const productId = parseInt(id || '0');
   const { product, loading, error } = useProduct(productId);
@@ -37,13 +35,6 @@ const ProductDetail = () => {
       setSelectedColor(product.colors[0]);
     }
   }, [product, selectedSize, selectedColor]);
-
-  // Add product to history when it loads
-  React.useEffect(() => {
-    if (product) {
-      addToHistory(product);
-    }
-  }, [product, addToHistory]);
 
   const handleAddToCart = () => {
     if (!product) return;
