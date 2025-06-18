@@ -1,14 +1,12 @@
+
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { wooCommerceApi } from '../utils/woocommerceApi';
 import { toast } from 'sonner';
-import { logger } from '../utils/logger';
 
 interface User {
-  id?: number;
   email: string;
   username: string;
   displayName: string;
-  customerId?: number;
 }
 
 interface AuthState {
@@ -89,20 +87,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const isValid = await wooCommerceApi.validateToken();
         if (isValid) {
-          // Try to get stored user data
-          const storedUser = localStorage.getItem('wc_user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            logger.log('AuthContext: Restored user from storage:', userData);
-            dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
-          } else {
-            dispatch({ type: 'LOGIN_FAILURE' });
-          }
+          // If token is valid, we should fetch user data
+          // For now, we'll just set as authenticated
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { email: '', username: '', displayName: '' } });
         } else {
           dispatch({ type: 'LOGIN_FAILURE' });
         }
       } catch (error) {
-        logger.error('Auth check failed:', error);
         dispatch({ type: 'LOGIN_FAILURE' });
       }
     };
@@ -114,34 +105,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'LOGIN_START' });
     
     try {
-      logger.log('AuthContext: Starting login process for:', username);
-      const { user, customerId } = await wooCommerceApi.login(username, password);
-      logger.log('AuthContext: Login successful, user:', user, 'customerId:', customerId);
-      
-      // Ensure we have proper user data
-      const userData = {
-        id: user.id,
-        email: user.email || username, // Fallback to username if email is missing
-        username: user.username || username,
-        displayName: user.displayName || user.username || username,
-        customerId: customerId
-      };
-      
-      logger.log('AuthContext: Final user data:', userData);
-      
-      // Store user data in localStorage
-      localStorage.setItem('wc_user', JSON.stringify(userData));
-      
-      dispatch({ type: 'LOGIN_SUCCESS', payload: userData });
+      const { user } = await wooCommerceApi.login(username, password);
+      dispatch({ type: 'LOGIN_SUCCESS', payload: user });
       toast.success('Login successful!');
       return true;
-    } catch (error: any) {
-      logger.error('AuthContext: Login failed:', error);
+    } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE' });
-      
-      // Show specific error message
-      const errorMessage = error.message || 'Login failed. Please check your credentials.';
-      toast.error(errorMessage);
+      toast.error('Login failed. Please check your credentials.');
       return false;
     }
   };
@@ -156,8 +126,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
-      logger.log('Starting registration process...');
-      
       await wooCommerceApi.register({
         username: userData.username,
         email: userData.email,
@@ -167,22 +135,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       
       dispatch({ type: 'SET_LOADING', payload: false });
-      toast.success('Registration successful! You can now log in.');
+      toast.success('Registration successful! Please login.');
       return true;
-    } catch (error: any) {
-      logger.error('Registration failed:', error);
+    } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false });
-      
-      // Show the specific error message
-      const errorMessage = error.message || 'Registration failed. Please try again.';
-      toast.error(errorMessage);
+      toast.error('Registration failed. Please try again.');
       return false;
     }
   };
 
   const logout = () => {
     wooCommerceApi.logout();
-    localStorage.removeItem('wc_user');
     dispatch({ type: 'LOGOUT' });
     toast.success('Logged out successfully!');
   };
