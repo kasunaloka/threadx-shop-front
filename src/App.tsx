@@ -1,3 +1,4 @@
+
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -52,27 +53,28 @@ const App = () => (
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/signup" element={<SignUpPage />} />
                   <Route path="/history" element={<ProductHistoryPage />} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route 
-                  path="/checkout" 
-                  element={
-                    <AuthGuard>
-                      <Checkout />
-                    </AuthGuard>
-                  } 
-                />
-                <Route 
-                  path="/order-success" 
-                  element={
-                    <AuthGuard>
-                      <OrderSuccess />
-                    </AuthGuard>
-                  } 
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </CartProvider>
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
+                  <Route 
+                    path="/checkout" 
+                    element={
+                      <AuthGuard>
+                        <Checkout />
+                      </AuthGuard>
+                    } 
+                  />
+                  <Route 
+                    path="/order-success" 
+                    element={
+                      <AuthGuard>
+                        <OrderSuccess />
+                      </AuthGuard>
+                    } 
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </CartProvider>
+            </ProductHistoryProvider>
           </BrowserRouter>
         </AuthProvider>
       </TooltipProvider>
